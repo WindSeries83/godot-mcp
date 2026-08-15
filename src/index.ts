@@ -20,8 +20,21 @@ function wsAccept(key: string): string {
 
 function wsSend(socket: Duplex, text: string): void {
   const buf = Buffer.from(text, "utf8");
-  const h = Buffer.alloc(4);
-  h[0] = 0x81; h[1] = 126; h.writeUInt16BE(buf.length, 2);
+  // Godot's WebSocketPeer rejects server frames that use the 16-bit extended
+  // length marker (0x7E) even for small payloads, so encode per-length:
+  //     < 126  -> short form     0x81 <len>
+  //     < 64K  -> 16-bit marker  0x81 0x7E <u16be>
+  //     else   -> 64-bit marker  0x81 0x7F <u64be>
+  let h: Buffer;
+  if (buf.length < 126) {
+    h = Buffer.from([0x81, buf.length]);
+  } else if (buf.length < 65536) {
+    h = Buffer.alloc(4);
+    h[0] = 0x81; h[1] = 126; h.writeUInt16BE(buf.length, 2);
+  } else {
+    h = Buffer.alloc(10);
+    h[0] = 0x81; h[1] = 127; h.writeBigUInt64BE(BigInt(buf.length), 2);
+  }
   socket.write(Buffer.concat([h, buf]));
 }
 
