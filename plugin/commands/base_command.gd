@@ -586,13 +586,36 @@ func build_timeout_error(timeout_sec: float) -> Dictionary:
 	return error(-32000, msg, data)
 
 
-## Find node by path in edited scene
+## True when `node_path` is a plain relative path that is safe to resolve
+## against the edited scene root. Godot resolves NodePaths starting with "/"
+## as ABSOLUTE paths from the SceneTree root, and ".." segments walk upwards —
+## both escape the edited scene and silently target the live editor tree.
+## Anything but a clean relative path is rejected so callers get an explicit
+## "not found" error instead of polluting the editor.
+static func is_safe_scene_path(node_path: String) -> bool:
+	if node_path.is_empty() or node_path.begins_with("/"):
+		return false
+	for segment: String in node_path.split("/"):
+		if segment.is_empty() or segment == "." or segment == "..":
+			return false
+	return true
+
+
+## Find node by path in edited scene.
+## `node_path` must be relative to the edited scene root: "." for the root
+## itself, "Player/Camera" for a descendant, or "<RootName>/Player/Camera"
+## with the root name prefix. Absolute paths ("/root/...") and paths escaping
+## upward ("../...") are rejected.
 func find_node_by_path(node_path: String) -> Node:
 	var root := get_edited_root()
 	if root == null:
 		return null
 	if node_path == "." or node_path == root.name:
 		return root
+	# Reject absolute or escaping paths before touching has_node/get_node,
+	# which would otherwise resolve them against the live editor tree.
+	if not is_safe_scene_path(node_path):
+		return null
 	# Try relative from root
 	if root.has_node(node_path):
 		return root.get_node(node_path)

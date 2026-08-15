@@ -290,10 +290,17 @@ func _update_property(params: Dictionary) -> Dictionary:
 	if value is String:
 		for prop in node.get_property_list():
 			if prop["name"] == property and prop["hint"] == PROPERTY_HINT_NODE_TYPE:
+				# Never resolve absolute NodePaths ("/root/...") — they escape
+				# the edited scene into the live editor tree.
+				if (value as String).begins_with("/"):
+					return error_invalid_params(
+						"Node reference '%s' for property '%s' must be relative to the edited scene, not an absolute Godot path" % [value, property])
 				var target_node: Node = node.get_node_or_null(NodePath(value))
 				if target_node == null:
 					target_node = root.get_node_or_null(NodePath(value))
-				if target_node == null:
+				# A target outside the edited scene (sibling of root or higher)
+				# would silently modify the live editor tree — reject it.
+				if target_node == null or (target_node != root and not root.is_ancestor_of(target_node)):
 					return error_not_found("Node '%s'" % value, "Could not resolve node path for property '%s'" % property)
 				parsed_value = target_node
 				break

@@ -41,7 +41,7 @@ func _enter_tree() -> void:
 	# Create status panel
 	var panel_scene: PackedScene = preload("res://addons/godot_mcp/ui/status_panel.tscn")
 	status_panel = panel_scene.instantiate()
-	add_control_to_bottom_panel(status_panel, "MCP Pro")
+	add_control_to_bottom_panel(status_panel, "godot-mcp")
 	status_panel.call_deferred("setup", websocket_server, command_router)
 
 	# Inject MCP autoloads into project settings
@@ -80,7 +80,13 @@ func _exit_tree() -> void:
 ## Project Settings. Defaults to false, so nothing changes unless a user turns
 ## it on — see SECURITY.md for what it does and does not protect against.
 func _register_project_settings() -> void:
-	const KEY := "godot_mcp_pro/require_connection_token"
+	const KEY := "godot_mcp/require_connection_token"
+	const LEGACY_KEY := "godot_mcp_pro/require_connection_token"
+	# Migrate the pre-rename setting so projects that already opted in keep
+	# the same behaviour after the namespace change.
+	if not ProjectSettings.has_setting(KEY) and ProjectSettings.has_setting(LEGACY_KEY):
+		ProjectSettings.set_setting(KEY, ProjectSettings.get_setting(LEGACY_KEY))
+		ProjectSettings.set_setting(LEGACY_KEY, null)
 	if not ProjectSettings.has_setting(KEY):
 		ProjectSettings.set_setting(KEY, false)
 	ProjectSettings.set_initial_value(KEY, false)

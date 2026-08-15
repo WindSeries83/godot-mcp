@@ -58,6 +58,16 @@ Ajoutez à la config de votre client IA (`.mcp.json`, `claude.json`, `opencode.j
 | `godot_execute` | Exécute du GDScript |
 | `godot_status` | Vérifie la connexion |
 
+> **Chemins de nodes** : les paramètres `parent_path` et `node_path` de
+> `godot_call` (ex. `add_node`, `update_property`, `delete_node`) sont
+> **toujours relatifs à la racine de la scène actuellement éditée** (`"."` =
+> racine de la scène). Les chemins absolus Godot (`"/root"`, `"../..."`) sont
+> rejetés — ils cibleraient l'arbre interne de l'éditeur au lieu de la scène.
+>
+> **`godot_screenshot`** nécessite un éditeur avec rendu actif : il ne
+> fonctionne pas en mode `--headless` (erreur "Could not get image from
+> viewport").
+
 ## Arborescence
 
 ```
@@ -133,6 +143,15 @@ Add to your AI client config (`.mcp.json`, `claude.json`, `opencode.json`):
 | `godot_screenshot` | Editor screenshot in PNG |
 | `godot_execute` | Run GDScript |
 | `godot_status` | Check connection |
+
+> **Node paths**: `parent_path` and `node_path` parameters of `godot_call`
+> (e.g. `add_node`, `update_property`, `delete_node`) are **always relative to
+> the root of the currently edited scene** (`"."` = scene root). Absolute
+> Godot paths (`"/root"`, `"../..."`) are rejected — they would target the
+> editor's internal tree instead of the scene.
+>
+> **`godot_screenshot`** requires an editor with active rendering: it does not
+> work in `--headless` mode ("Could not get image from viewport" error).
 
 ## Structure
 

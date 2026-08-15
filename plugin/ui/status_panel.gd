@@ -96,7 +96,7 @@ func _build_ui() -> void:
 	header.add_child(_status_icon)
 
 	_status_label = Label.new()
-	_status_label.text = " MCP Pro: Waiting for connection..."
+	_status_label.text = " godot-mcp: Waiting for connection..."
 	header.add_child(_status_label)
 
 	var spacer := Control.new()
@@ -255,13 +255,13 @@ func _process(_delta: float) -> void:
 
 	if count > 0:
 		_status_icon.add_theme_color_override("font_color", COLOR_CONNECTED)
-		_status_label.text = " MCP Pro: Connected"
+		_status_label.text = " godot-mcp: Connected"
 	elif any_stale:
 		_status_icon.add_theme_color_override("font_color", COLOR_STALE)
-		_status_label.text = " MCP Pro: ⚠ Reconnecting (stale connection detected)..."
+		_status_label.text = " godot-mcp: ⚠ Reconnecting (stale connection detected)..."
 	else:
 		_status_icon.add_theme_color_override("font_color", COLOR_DISCONNECTED)
-		_status_label.text = " MCP Pro: Waiting for connection..."
+		_status_label.text = " godot-mcp: Waiting for connection..."
 
 	# Update clients tab
 	_update_clients_tab()

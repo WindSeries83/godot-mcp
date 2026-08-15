@@ -25,7 +25,7 @@ const HANDSHAKE_TIMEOUT := 10.0  # give up on a socket stuck CONNECTING/CLOSING
 ## shared machine and against cross-project mix-ups, NOT against a process
 ## running as you, which can read the token file just as a real server does.
 const TOKEN_PATH := "user://mcp_auth_token"
-const TOKEN_SETTING := "godot_mcp_pro/require_connection_token"
+const TOKEN_SETTING := "godot_mcp/require_connection_token"
 const AUTH_TIMEOUT := 5.0  # close a peer that has not authenticated in time
 
 # Per-port connection state
