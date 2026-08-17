@@ -61,15 +61,34 @@ function decodeFrame(buf: Buffer): { opcode: number; payload: Buffer; total: num
 }
 
 class GodotBridge {
-  private servers = new Set<http.Server>();
-  private peers = new Map<number, Duplex>();
+  private server: http.Server | null = null;
+  private port = 0;
+  private peers = new Set<Duplex>();
   private bufs = new Map<Duplex, Buffer>();
   private pending = new Map<number, Pending>();
   private nextId = 1;
 
-  start(): void {
+  // One port per instance is the contract the Godot addon expects: it dials
+  // every port in the range and keeps a socket per server it finds
+  // (plugin/websocket_server.gd). Binding the whole range from a single
+  // instance broke it both ways — the second instance died on an unhandled
+  // EADDRINUSE, so any second agent session silently had no Godot tools at
+  // all, and the first instance sat on nine ports it never used.
+  async start(): Promise<void> {
     for (const port of ALL_PORTS) {
+      if (await this.listenOn(port)) return;
+    }
+    console.error(
+      `godot-mcp: ports ${ALL_PORTS[0]}-${ALL_PORTS[ALL_PORTS.length - 1]} are all taken, ` +
+      `so this instance has no channel to the editor. Close an unused agent session, ` +
+      `or move this one with GODOT_MCP_PORT.`
+    );
+  }
+
+  private listenOn(port: number): Promise<boolean> {
+    return new Promise((resolve) => {
       const srv = http.createServer();
+      let bound = false;
       srv.on("upgrade", (req, socket) => {
         const key = req.headers["sec-websocket-key"];
         if (!key) { socket.destroy(); return; }
@@ -79,28 +98,60 @@ class GodotBridge {
           "Connection: Upgrade\r\n" +
           "Sec-WebSocket-Accept: " + wsAccept(key) + "\r\n\r\n"
         );
-        this.peers.set(port, socket);
+        // Keyed by socket, not by port: two editors reaching the same port used
+        // to overwrite each other in the map, leaking the first socket.
+        this.peers.add(socket);
         this.bufs.set(socket, Buffer.alloc(0));
         socket.on("data", (chunk) => this.onData(socket, chunk));
-        socket.on("close", () => { this.peers.delete(port); this.bufs.delete(socket); });
-        socket.on("error", () => { this.peers.delete(port); this.bufs.delete(socket); });
+        socket.on("close", () => { this.peers.delete(socket); this.bufs.delete(socket); });
+        socket.on("error", () => { this.peers.delete(socket); this.bufs.delete(socket); });
       });
-      srv.listen(port, "127.0.0.1");
-      this.servers.add(srv);
-    }
+      // Without this listener a busy port throws out of the event loop and
+      // takes the whole MCP process down.
+      srv.on("error", (err: NodeJS.ErrnoException) => {
+        if (bound) { console.error(`godot-mcp: server error on port ${port}: ${err.message}`); return; }
+        srv.close();
+        resolve(false);
+      });
+      srv.listen(port, "127.0.0.1", () => {
+        bound = true;
+        this.server = srv;
+        this.port = port;
+        resolve(true);
+      });
+    });
   }
 
   stop(): void {
     for (const [, p] of this.pending) { clearTimeout(p.timer); p.reject(new Error("Server shutting down")); }
     this.pending.clear();
-    for (const srv of this.servers) srv.close();
-    for (const sock of this.peers.values()) sock.destroy();
+    this.server?.close();
+    this.server = null;
+    for (const sock of this.peers) sock.destroy();
     this.peers.clear();
     this.bufs.clear();
   }
 
   get connected(): boolean {
     return this.peers.size > 0;
+  }
+
+  get status(): string {
+    if (!this.server) {
+      return `No port bound — ${ALL_PORTS[0]}-${ALL_PORTS[ALL_PORTS.length - 1]} were all busy. ` +
+        `Every agent session needs a free port; close an unused one or set GODOT_MCP_PORT.`;
+    }
+    if (this.peers.size === 0) {
+      return `Listening on port ${this.port}, no Godot editor connected — ` +
+        `start Godot with the godot_mcp plugin enabled.`;
+    }
+    if (this.peers.size === 1) return `Connected to the Godot editor on port ${this.port}.`;
+    // ponytail: the protocol carries no project identity, so a second editor on
+    // this port gets reported rather than routed — a call could otherwise land
+    // in the wrong project with nothing to show for it. Upgrade: have the addon
+    // announce its project path on connect and select the peer by project.
+    return `${this.peers.size} Godot editors are connected on port ${this.port} — calls go to ` +
+      `whichever answered first. Close the editors you are not driving.`;
   }
 
   async call(method: string, params?: Record<string, unknown>): Promise<unknown> {
@@ -289,7 +340,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       }
       case "godot_status": {
-        return { content: [{ type: "text", text: godot.connected ? "Connected to Godot editor" : "Not connected — start Godot with the MCP plugin enabled" }] };
+        return { content: [{ type: "text", text: godot.status }] };
       }
       default:
         throw new Error(`Unknown tool: ${name}`);
@@ -301,7 +352,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
 });
 
 async function main() {
-  godot.start();
+  await godot.start();
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
