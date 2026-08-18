@@ -12,6 +12,7 @@ func get_commands() -> Dictionary:
 		"add_raycast": _add_raycast,
 		"setup_physics_body": _setup_physics_body,
 		"get_collision_info": _get_collision_info,
+		"create_mesh_collision": _create_mesh_collision,
 	}
 
 
@@ -106,6 +107,17 @@ func get_command_schemas() -> Dictionary:
 				"include_children": {"type": "bool", "required": false, "default": true},
 			},
 			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"create_mesh_collision": {
+			"category": "physics",
+			"summary": "Generate collision geometry from a MeshInstance3D's mesh, via Godot's own MeshInstance3D.create_trimesh_collision()/create_convex_collision(). Adds a new StaticBody3D child under the mesh. Not routed through UndoRedo (a Godot engine limitation) — use delete_node to remove it if needed.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to a MeshInstance3D with a mesh assigned"},
+				"mode": {"type": "string", "required": false, "default": "trimesh", "desc": "trimesh: exact but static-only (concave) collision. convex: simpler, works for moving bodies too, but only approximates the shape"},
+				"clean": {"type": "bool", "required": false, "default": true, "desc": "convex only: passed to create_convex_collision"},
+				"simplify": {"type": "bool", "required": false, "default": false, "desc": "convex only: passed to create_convex_collision"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
 		},
 	}
 
@@ -850,3 +862,51 @@ func _get_collision_info(params: Dictionary) -> Dictionary:
 	info["raycasts"] = raycasts
 
 	return success(info)
+
+
+func _create_mesh_collision(params: Dictionary) -> Dictionary:
+	var result := require_string(params, "node_path")
+	if result[1] != null:
+		return result[1]
+	var node_path: String = result[0]
+
+	var root := get_edited_root()
+	if root == null:
+		return error_no_scene()
+
+	var node := find_node_by_path(node_path)
+	if node == null:
+		return error_not_found("Node '%s'" % node_path)
+	if not node is MeshInstance3D:
+		return error_invalid_params("Node '%s' is a %s, not a MeshInstance3D" % [node_path, node.get_class()])
+	var mesh_instance := node as MeshInstance3D
+	if mesh_instance.mesh == null:
+		return error_invalid_params("Node '%s' has no mesh assigned" % node_path)
+
+	var mode: String = optional_string(params, "mode", "trimesh").to_lower()
+	var before: Array[Node] = mesh_instance.get_children()
+
+	match mode:
+		"trimesh":
+			mesh_instance.create_trimesh_collision()
+		"convex":
+			var clean: bool = optional_bool(params, "clean", true)
+			var simplify: bool = optional_bool(params, "simplify", false)
+			mesh_instance.create_convex_collision(clean, simplify)
+		_:
+			return error_invalid_params("'mode' must be one of: trimesh, convex")
+
+	var created: Array = []
+	for child in mesh_instance.get_children():
+		if not before.has(child):
+			created.append(str(root.get_path_to(child)))
+
+	if created.is_empty():
+		return error_internal("Collision generation reported no error but created no new child node")
+
+	return success({
+		"node_path": node_path,
+		"mode": mode,
+		"created_nodes": created,
+		"note": "Created outside EditorUndoRedoManager; use delete_node to remove if needed.",
+	})

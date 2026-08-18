@@ -15,6 +15,13 @@ func get_commands() -> Dictionary:
 		"add_gridmap": _add_gridmap,
 		"get_spatial_bounds": _get_spatial_bounds,
 		"turntable_screenshot": _turntable_screenshot,
+		"snap_to_ground": _snap_to_ground,
+		"align_nodes": _align_nodes,
+		"distribute_nodes": _distribute_nodes,
+		"look_at_node": _look_at_node,
+		"add_csg_shape": _add_csg_shape,
+		"add_multimesh_scatter": _add_multimesh_scatter,
+		"add_path3d": _add_path3d,
 	}
 
 
@@ -168,6 +175,98 @@ func get_command_schemas() -> Dictionary:
 				"save_path": {"type": "string", "required": false, "default": "", "desc": "If given, save the composed sheet here (res://, user://, or absolute) instead of returning base64"},
 			},
 			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"snap_to_ground": {
+			"category": "3d",
+			"summary": "Moves a node's Y position so the bottom of its world-space bounds rests on a ground plane — either another node's bounds top, or a literal Y value. AABB-based, not a physics raycast, so it works reliably in the editor regardless of collision setup.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to the Node3D to move"},
+				"ground_path": {"type": "string", "required": false, "desc": "Scene-relative path to a node defining the ground surface (its bounds' top Y is used); if omitted, ground_y is used instead"},
+				"ground_y": {"type": "float", "required": false, "default": 0.0, "desc": "World-space ground Y; used only when ground_path is omitted"},
+				"offset": {"type": "float", "required": false, "default": 0.0, "desc": "Extra Y offset applied after snapping, e.g. to embed slightly or hover"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"align_nodes": {
+			"category": "3d",
+			"summary": "Sets every given node's global_position on one axis to a common value: min/max/center of their current positions, or an explicit number. Aligns by node origin (global_position), not visual bounds.",
+			"params": {
+				"node_paths": {"type": "array", "required": true, "desc": "Scene-relative paths to 2+ Node3D nodes"},
+				"axis": {"type": "string", "required": true, "desc": "One of: x, y, z"},
+				"align_to": {"type": "any", "required": false, "default": "center", "desc": "One of: min, max, center — or a literal number"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"distribute_nodes": {
+			"category": "3d",
+			"summary": "Evenly spaces 3+ nodes along one axis between the current min and max positions among them; the two extreme nodes stay fixed, the rest are repositioned. Distributes by node origin (global_position).",
+			"params": {
+				"node_paths": {"type": "array", "required": true, "desc": "Scene-relative paths to 3+ Node3D nodes"},
+				"axis": {"type": "string", "required": true, "desc": "One of: x, y, z"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"look_at_node": {
+			"category": "3d",
+			"summary": "Rotates a node to face a target node or point. Exactly one of target_path or target is required.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to the Node3D to rotate"},
+				"target_path": {"type": "string", "required": false, "desc": "Scene-relative path to a node to face"},
+				"target": {"type": "any", "required": false, "desc": "Vector3-like world point to face; used only when target_path is omitted"},
+				"up": {"type": "any", "required": false, "default": [0, 1, 0], "desc": "Vector3-like up reference"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"add_csg_shape": {
+			"category": "3d",
+			"summary": "Add a CSG primitive (box/sphere/cylinder/polygon) or a CSGCombiner3D grouping node, for greyboxing a level with boolean union/intersection/subtraction. CSGShape3D can generate its own collision (use_collision).",
+			"params": {
+				"shape": {"type": "string", "required": true, "desc": "One of: box, sphere, cylinder, polygon, combiner"},
+				"parent_path": {"type": "string", "required": false, "default": ".", "desc": "Scene-relative path to the parent node — typically a CSGCombiner3D to compose with siblings"},
+				"name": {"type": "string", "required": false, "default": "", "desc": "Defaults to the capitalized shape name"},
+				"operation": {"type": "string", "required": false, "default": "union", "desc": "One of: union, intersection, subtraction — applies to combiner too, since CSGCombiner3D is itself a CSGShape3D (relevant when nesting combiners)"},
+				"use_collision": {"type": "bool", "required": false, "default": true, "desc": "Applies to combiner too, for the same reason"},
+				"size": {"type": "any", "required": false, "default": [1, 1, 1], "desc": "box only: Vector3-like"},
+				"radius": {"type": "float", "required": false, "default": 0.5, "desc": "sphere/cylinder only"},
+				"radial_segments": {"type": "int", "required": false, "default": 12, "desc": "sphere only"},
+				"rings": {"type": "int", "required": false, "default": 6, "desc": "sphere only"},
+				"height": {"type": "float", "required": false, "default": 1.0, "desc": "cylinder only"},
+				"sides": {"type": "int", "required": false, "default": 12, "desc": "cylinder only"},
+				"cone": {"type": "bool", "required": false, "default": false, "desc": "cylinder only: taper to a point"},
+				"polygon_points": {"type": "array", "required": false, "desc": "polygon only, required for it: 3+ [x,y] pairs or {x,y} dicts, the 2D cross-section to extrude"},
+				"depth": {"type": "float", "required": false, "default": 1.0, "desc": "polygon only: extrusion depth"},
+				"position": {"type": "any", "required": false, "default": [0, 0, 0], "desc": "Vector3-like"},
+				"rotation": {"type": "any", "required": false, "default": [0, 0, 0], "desc": "Rotation in degrees, Vector3-like"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"add_multimesh_scatter": {
+			"category": "3d",
+			"summary": "Scatters random instances of a mesh across the flat top of another node's world-space bounds, as a single MultiMeshInstance3D. Places on a flat plane at the bounds' max Y — does not follow uneven terrain (no raycast involved).",
+			"params": {
+				"mesh_path": {"type": "string", "required": true, "desc": "res:// path to a Mesh resource (.res/.tres/.mesh) — a .tscn/.glb scene path is rejected, load its mesh resource directly"},
+				"area_path": {"type": "string", "required": true, "desc": "Scene-relative path to a node defining the scatter area (its world bounds are used)"},
+				"parent_path": {"type": "string", "required": false, "default": ".", "desc": "Scene-relative path to the parent for the new MultiMeshInstance3D"},
+				"name": {"type": "string", "required": false, "default": "MultiMeshInstance3D"},
+				"count": {"type": "int", "required": false, "default": 20, "desc": "Instance count, clamped 1-5000"},
+				"y_offset": {"type": "float", "required": false, "default": 0.0, "desc": "Added to the computed ground Y for every instance"},
+				"scale_min": {"type": "float", "required": false, "default": 1.0},
+				"scale_max": {"type": "float", "required": false, "default": 1.0},
+				"random_rotation_y": {"type": "bool", "required": false, "default": true, "desc": "Randomize each instance's yaw"},
+				"seed": {"type": "int", "required": false, "default": 0, "desc": "Non-zero for reproducible scatter; 0 uses a random seed each call"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"add_path3d": {
+			"category": "3d",
+			"summary": "Create a Path3D from a list of points, optionally with a PathFollow3D child.",
+			"params": {
+				"points": {"type": "array", "required": true, "desc": "2+ Vector3-like points, e.g. [[0,0,0],[5,0,0],[5,0,5]]"},
+				"parent_path": {"type": "string", "required": false, "default": ".", "desc": "Scene-relative path to the parent node"},
+				"name": {"type": "string", "required": false, "default": "Path3D"},
+				"add_path_follow": {"type": "bool", "required": false, "default": false, "desc": "Also add a PathFollow3D child"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
 		},
 	}
 
@@ -1005,3 +1104,468 @@ func _turntable_screenshot(params: Dictionary) -> Dictionary:
 	var png_buffer := sheet.save_png_to_buffer()
 	response["image_base64"] = Marshalls.raw_to_base64(png_buffer)
 	return success(response)
+
+
+## ─── 9. snap_to_ground ──────────────────────────────────────────────────────
+
+func _snap_to_ground(params: Dictionary) -> Dictionary:
+	var result := require_string(params, "node_path")
+	if result[1] != null:
+		return result[1]
+	var node_path: String = result[0]
+
+	var root := get_edited_root()
+	if root == null:
+		return error_no_scene()
+
+	var node := find_node_by_path(node_path)
+	if node == null:
+		return error_not_found("Node '%s'" % node_path)
+	if not node is Node3D:
+		return error_invalid_params("Node '%s' is a %s, not a Node3D" % [node_path, node.get_class()])
+	var node3d := node as Node3D
+
+	var node_aabb: Variant = _world_aabb_of(node3d, true)
+	if node_aabb == null:
+		return error(-32000, "No visual geometry found under '%s'" % node_path, {
+			"suggestion": "The node (or a child) must contain a VisualInstance3D such as MeshInstance3D",
+		})
+	var b: AABB = node_aabb
+
+	var ground_y: float
+	if params.has("ground_path"):
+		var ground_node := find_node_by_path(str(params["ground_path"]))
+		if ground_node == null:
+			return error_not_found("Node '%s'" % params["ground_path"])
+		if not ground_node is Node3D:
+			return error_invalid_params("ground_path '%s' is a %s, not a Node3D" % [params["ground_path"], ground_node.get_class()])
+		var ground_aabb: Variant = _world_aabb_of(ground_node, true)
+		if ground_aabb == null:
+			return error(-32000, "No visual geometry found under ground_path '%s'" % params["ground_path"], {})
+		ground_y = (ground_aabb as AABB).position.y + (ground_aabb as AABB).size.y
+	else:
+		ground_y = optional_float(params, "ground_y", 0.0)
+
+	var offset: float = optional_float(params, "offset", 0.0)
+	var delta := (ground_y + offset) - b.position.y
+
+	var old_pos := node3d.global_position
+	var new_pos := old_pos + Vector3(0, delta, 0)
+
+	var undo_redo := get_undo_redo()
+	undo_redo.create_action("MCP: Snap To Ground")
+	undo_redo.add_do_property(node3d, "global_position", new_pos)
+	undo_redo.add_undo_property(node3d, "global_position", old_pos)
+	undo_redo.commit_action()
+
+	return success({
+		"node_path": node_path,
+		"position": {"x": new_pos.x, "y": new_pos.y, "z": new_pos.z},
+		"ground_y": ground_y,
+	})
+
+
+## ─── 10. align_nodes / distribute_nodes ────────────────────────────────────
+
+func _collect_node3d_list(node_paths: Array) -> Array:
+	## Returns [Array[Node3D], error_dict]; error_dict is null on success.
+	var nodes: Array[Node3D] = []
+	for p: Variant in node_paths:
+		var n := find_node_by_path(str(p))
+		if n == null:
+			return [null, error_not_found("Node '%s'" % p)]
+		if not n is Node3D:
+			return [null, error_invalid_params("Node '%s' is a %s, not a Node3D" % [p, n.get_class()])]
+		nodes.append(n as Node3D)
+	return [nodes, null]
+
+
+func _axis_value(v: Vector3, axis: String) -> float:
+	match axis:
+		"x": return v.x
+		"y": return v.y
+		_: return v.z
+
+
+func _with_axis_value(v: Vector3, axis: String, value: float) -> Vector3:
+	match axis:
+		"x": return Vector3(value, v.y, v.z)
+		"y": return Vector3(v.x, value, v.z)
+		_: return Vector3(v.x, v.y, value)
+
+
+func _align_nodes(params: Dictionary) -> Dictionary:
+	if not params.has("node_paths") or not params["node_paths"] is Array or (params["node_paths"] as Array).is_empty():
+		return error_invalid_params("'node_paths' (non-empty array) is required")
+
+	var axis_result := require_string(params, "axis")
+	if axis_result[1] != null:
+		return axis_result[1]
+	var axis: String = axis_result[0]
+	if not axis in ["x", "y", "z"]:
+		return error_invalid_params("'axis' must be one of: x, y, z")
+
+	var root := get_edited_root()
+	if root == null:
+		return error_no_scene()
+
+	var collected := _collect_node3d_list(params["node_paths"])
+	if collected[1] != null:
+		return collected[1]
+	var nodes: Array[Node3D] = collected[0]
+
+	var values: Array[float] = []
+	for n: Node3D in nodes:
+		values.append(_axis_value(n.global_position, axis))
+
+	var align_to: Variant = params.get("align_to", "center")
+	var target: float
+	if align_to is String:
+		match align_to:
+			"min":
+				target = values.min()
+			"max":
+				target = values.max()
+			"center", "average":
+				var sum := 0.0
+				for v: float in values:
+					sum += v
+				target = sum / values.size()
+			_:
+				return error_invalid_params("'align_to' must be a number, or one of: min, max, center")
+	else:
+		target = float(align_to)
+
+	var undo_redo := get_undo_redo()
+	undo_redo.create_action("MCP: Align Nodes")
+	var moved: Array = []
+	for n: Node3D in nodes:
+		var new_pos := _with_axis_value(n.global_position, axis, target)
+		undo_redo.add_do_property(n, "global_position", new_pos)
+		undo_redo.add_undo_property(n, "global_position", n.global_position)
+		moved.append(str(root.get_path_to(n)))
+	undo_redo.commit_action()
+
+	return success({"aligned": moved, "axis": axis, "target": target})
+
+
+func _distribute_nodes(params: Dictionary) -> Dictionary:
+	if not params.has("node_paths") or not params["node_paths"] is Array:
+		return error_invalid_params("'node_paths' (array) is required")
+
+	var axis_result := require_string(params, "axis")
+	if axis_result[1] != null:
+		return axis_result[1]
+	var axis: String = axis_result[0]
+	if not axis in ["x", "y", "z"]:
+		return error_invalid_params("'axis' must be one of: x, y, z")
+
+	var root := get_edited_root()
+	if root == null:
+		return error_no_scene()
+
+	var collected := _collect_node3d_list(params["node_paths"])
+	if collected[1] != null:
+		return collected[1]
+	var nodes: Array[Node3D] = collected[0]
+	if nodes.size() < 3:
+		return error_invalid_params("'node_paths' needs at least 3 nodes to distribute (the two extremes stay fixed)")
+
+	var indices: Array = range(nodes.size())
+	indices.sort_custom(func(a: int, b: int) -> bool:
+		return _axis_value(nodes[a].global_position, axis) < _axis_value(nodes[b].global_position, axis)
+	)
+	var sorted_nodes: Array[Node3D] = []
+	for i: int in indices:
+		sorted_nodes.append(nodes[i])
+
+	var lo := _axis_value(sorted_nodes[0].global_position, axis)
+	var hi := _axis_value(sorted_nodes[-1].global_position, axis)
+	var step := (hi - lo) / float(sorted_nodes.size() - 1)
+
+	var undo_redo := get_undo_redo()
+	undo_redo.create_action("MCP: Distribute Nodes")
+	var moved: Array = []
+	for i in sorted_nodes.size():
+		var n: Node3D = sorted_nodes[i]
+		var target := lo + step * i
+		var new_pos := _with_axis_value(n.global_position, axis, target)
+		undo_redo.add_do_property(n, "global_position", new_pos)
+		undo_redo.add_undo_property(n, "global_position", n.global_position)
+		moved.append(str(root.get_path_to(n)))
+	undo_redo.commit_action()
+
+	return success({"distributed": moved, "axis": axis, "step": step})
+
+
+## ─── 11. look_at_node ───────────────────────────────────────────────────────
+
+func _look_at_node(params: Dictionary) -> Dictionary:
+	var result := require_string(params, "node_path")
+	if result[1] != null:
+		return result[1]
+	var node_path: String = result[0]
+
+	var root := get_edited_root()
+	if root == null:
+		return error_no_scene()
+
+	var node := find_node_by_path(node_path)
+	if node == null:
+		return error_not_found("Node '%s'" % node_path)
+	if not node is Node3D:
+		return error_invalid_params("Node '%s' is a %s, not a Node3D" % [node_path, node.get_class()])
+	var node3d := node as Node3D
+
+	var target_pos: Vector3
+	if params.has("target_path"):
+		var target_node := find_node_by_path(str(params["target_path"]))
+		if target_node == null:
+			return error_not_found("Node '%s'" % params["target_path"])
+		if not target_node is Node3D:
+			return error_invalid_params("target_path '%s' is a %s, not a Node3D" % [params["target_path"], target_node.get_class()])
+		target_pos = (target_node as Node3D).global_position
+	elif params.has("target"):
+		target_pos = _parse_vector3_param(params, "target", Vector3.ZERO)
+	else:
+		return error_invalid_params("Either 'target_path' or 'target' is required")
+
+	if target_pos.is_equal_approx(node3d.global_position):
+		return error_invalid_params("Target is at the same position as the node; cannot compute a look direction")
+
+	var up := _parse_vector3_param(params, "up", Vector3.UP)
+
+	var old_transform := node3d.global_transform
+	node3d.look_at(target_pos, up)
+	var new_transform := node3d.global_transform
+	node3d.global_transform = old_transform
+
+	var undo_redo := get_undo_redo()
+	undo_redo.create_action("MCP: Look At")
+	undo_redo.add_do_property(node3d, "global_transform", new_transform)
+	undo_redo.add_undo_property(node3d, "global_transform", old_transform)
+	undo_redo.commit_action()
+
+	var final_rot := node3d.rotation_degrees
+	return success({
+		"node_path": node_path,
+		"rotation_degrees": {"x": final_rot.x, "y": final_rot.y, "z": final_rot.z},
+	})
+
+
+## ─── 12. add_csg_shape ──────────────────────────────────────────────────────
+
+func _add_csg_shape(params: Dictionary) -> Dictionary:
+	var result := require_string(params, "shape")
+	if result[1] != null:
+		return result[1]
+	var shape_kind: String = result[0].to_lower()
+
+	var root := get_edited_root()
+	if root == null:
+		return error_no_scene()
+
+	var parent_path: String = optional_string(params, "parent_path", ".")
+	var parent := find_node_by_path(parent_path)
+	if parent == null:
+		return error_not_found("Parent node '%s'" % parent_path)
+
+	var shape: Node3D = null
+	match shape_kind:
+		"box":
+			var box := CSGBox3D.new()
+			box.size = _parse_vector3_param(params, "size", Vector3.ONE)
+			shape = box
+		"sphere":
+			var sph := CSGSphere3D.new()
+			sph.radius = _optional_float(params, "radius", 0.5)
+			sph.radial_segments = optional_int(params, "radial_segments", 12)
+			sph.rings = optional_int(params, "rings", 6)
+			shape = sph
+		"cylinder":
+			var cyl := CSGCylinder3D.new()
+			cyl.radius = _optional_float(params, "radius", 0.5)
+			cyl.height = _optional_float(params, "height", 1.0)
+			cyl.sides = optional_int(params, "sides", 12)
+			cyl.cone = optional_bool(params, "cone", false)
+			shape = cyl
+		"polygon":
+			if not params.has("polygon_points") or not params["polygon_points"] is Array:
+				return error_invalid_params("'polygon_points' (array of [x,y] pairs) is required for shape=polygon")
+			var pts_raw: Array = params["polygon_points"]
+			var polygon := PackedVector2Array()
+			for pt: Variant in pts_raw:
+				if pt is Array and (pt as Array).size() >= 2:
+					polygon.append(Vector2(float(pt[0]), float(pt[1])))
+				elif pt is Dictionary:
+					polygon.append(Vector2(float(pt.get("x", 0)), float(pt.get("y", 0))))
+			if polygon.size() < 3:
+				return error_invalid_params("'polygon_points' needs at least 3 points")
+			var poly := CSGPolygon3D.new()
+			poly.polygon = polygon
+			poly.depth = _optional_float(params, "depth", 1.0)
+			shape = poly
+		"combiner":
+			shape = CSGCombiner3D.new()
+		_:
+			return error_invalid_params("Unknown shape '%s'. Use: box, sphere, cylinder, polygon, combiner" % shape_kind)
+
+	if shape is CSGShape3D:
+		var op_str: String = optional_string(params, "operation", "union").to_lower()
+		var op_map := {
+			"union": CSGShape3D.OPERATION_UNION,
+			"intersection": CSGShape3D.OPERATION_INTERSECTION,
+			"subtraction": CSGShape3D.OPERATION_SUBTRACTION,
+		}
+		if not op_map.has(op_str):
+			shape.free()
+			return error_invalid_params("'operation' must be one of: union, intersection, subtraction")
+		(shape as CSGShape3D).operation = op_map[op_str] as CSGShape3D.Operation
+		(shape as CSGShape3D).use_collision = optional_bool(params, "use_collision", true)
+
+	shape.name = optional_string(params, "name", shape_kind.capitalize())
+	shape.position = _parse_vector3_param(params, "position", Vector3.ZERO)
+	shape.rotation_degrees = _parse_vector3_param(params, "rotation", Vector3.ZERO)
+
+	_add_child_with_undo(shape, parent, root, "MCP: Add CSG %s" % shape_kind.capitalize())
+
+	return success({
+		"node_path": str(root.get_path_to(shape)),
+		"name": str(shape.name),
+		"shape": shape_kind,
+	})
+
+
+## ─── 13. add_multimesh_scatter ─────────────────────────────────────────────
+
+func _add_multimesh_scatter(params: Dictionary) -> Dictionary:
+	var result := require_string(params, "mesh_path")
+	if result[1] != null:
+		return result[1]
+	var mesh_path: String = result[0]
+	if not ResourceLoader.exists(mesh_path):
+		return error_not_found("Mesh resource '%s'" % mesh_path)
+	var loaded: Resource = ResourceLoader.load(mesh_path)
+	if not loaded is Mesh:
+		return error_invalid_params("'%s' is a %s, not a Mesh" % [mesh_path, loaded.get_class()])
+	var mesh: Mesh = loaded
+
+	var root := get_edited_root()
+	if root == null:
+		return error_no_scene()
+
+	var area_result := require_string(params, "area_path")
+	if area_result[1] != null:
+		return area_result[1]
+	var area_path: String = area_result[0]
+	var area_node := find_node_by_path(area_path)
+	if area_node == null:
+		return error_not_found("Node '%s'" % area_path)
+	if not area_node is Node3D:
+		return error_invalid_params("area_path '%s' is a %s, not a Node3D" % [area_path, area_node.get_class()])
+
+	var area_aabb: Variant = _world_aabb_of(area_node, true)
+	if area_aabb == null:
+		return error(-32000, "No visual geometry found under '%s' to scatter over" % area_path, {
+			"suggestion": "area_path must contain a VisualInstance3D defining the surface bounds",
+		})
+	var b: AABB = area_aabb
+
+	var parent_path: String = optional_string(params, "parent_path", ".")
+	var parent := find_node_by_path(parent_path)
+	if parent == null:
+		return error_not_found("Parent node '%s'" % parent_path)
+
+	var count: int = clampi(optional_int(params, "count", 20), 1, 5000)
+	var y_offset: float = optional_float(params, "y_offset", 0.0)
+	var scale_min: float = optional_float(params, "scale_min", 1.0)
+	var scale_max: float = optional_float(params, "scale_max", 1.0)
+	var random_rotation_y: bool = optional_bool(params, "random_rotation_y", true)
+	var seed_value: int = optional_int(params, "seed", 0)
+
+	var rng := RandomNumberGenerator.new()
+	if seed_value != 0:
+		rng.seed = seed_value
+
+	var multimesh := MultiMesh.new()
+	multimesh.transform_format = MultiMesh.TRANSFORM_3D
+	multimesh.mesh = mesh
+	multimesh.instance_count = count
+
+	var top_y := b.position.y + b.size.y + y_offset
+
+	for i in count:
+		var x := rng.randf_range(b.position.x, b.position.x + b.size.x)
+		var z := rng.randf_range(b.position.z, b.position.z + b.size.z)
+		var s := rng.randf_range(scale_min, scale_max)
+		var rot_y := rng.randf_range(0.0, TAU) if random_rotation_y else 0.0
+		var xform := Transform3D(Basis(Vector3.UP, rot_y).scaled(Vector3.ONE * s), Vector3(x, top_y, z))
+		multimesh.set_instance_transform(i, xform)
+
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = multimesh
+	mmi.name = optional_string(params, "name", "MultiMeshInstance3D")
+
+	_add_child_with_undo(mmi, parent, root, "MCP: Add MultiMesh Scatter")
+
+	return success({
+		"node_path": str(root.get_path_to(mmi)),
+		"name": str(mmi.name),
+		"count": count,
+		"area_top_y": top_y,
+	})
+
+
+## ─── 14. add_path3d ─────────────────────────────────────────────────────────
+
+func _add_path3d(params: Dictionary) -> Dictionary:
+	var root := get_edited_root()
+	if root == null:
+		return error_no_scene()
+
+	var parent_path: String = optional_string(params, "parent_path", ".")
+	var parent := find_node_by_path(parent_path)
+	if parent == null:
+		return error_not_found("Parent node '%s'" % parent_path)
+
+	if not params.has("points") or not params["points"] is Array:
+		return error_invalid_params("'points' (array of Vector3-like values) is required")
+	var points_raw: Array = params["points"]
+	if points_raw.size() < 2:
+		return error_invalid_params("'points' needs at least 2 points")
+
+	var curve := Curve3D.new()
+	for pt: Variant in points_raw:
+		var v := Vector3.ZERO
+		if pt is Array and (pt as Array).size() >= 3:
+			v = Vector3(float(pt[0]), float(pt[1]), float(pt[2]))
+		elif pt is Dictionary:
+			v = Vector3(float(pt.get("x", 0)), float(pt.get("y", 0)), float(pt.get("z", 0)))
+		curve.add_point(v)
+
+	var path3d := Path3D.new()
+	path3d.curve = curve
+	path3d.name = optional_string(params, "name", "Path3D")
+
+	_add_child_with_undo(path3d, parent, root, "MCP: Add Path3D")
+
+	var add_follower: bool = optional_bool(params, "add_path_follow", false)
+	var follow_path_str := ""
+	if add_follower:
+		var follower := PathFollow3D.new()
+		follower.name = "PathFollow3D"
+		var undo_redo := get_undo_redo()
+		undo_redo.create_action("MCP: Add PathFollow3D")
+		undo_redo.add_do_method(path3d, "add_child", follower)
+		undo_redo.add_do_method(follower, "set_owner", root)
+		undo_redo.add_do_reference(follower)
+		undo_redo.add_undo_method(path3d, "remove_child", follower)
+		undo_redo.commit_action()
+		follow_path_str = str(root.get_path_to(follower))
+
+	return success({
+		"node_path": str(root.get_path_to(path3d)),
+		"name": str(path3d.name),
+		"point_count": curve.point_count,
+		"path_follow_node": follow_path_str,
+	})
