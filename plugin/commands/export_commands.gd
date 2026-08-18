@@ -10,6 +10,33 @@ func get_commands() -> Dictionary:
 	}
 
 
+func get_command_schemas() -> Dictionary:
+	return {
+		"list_export_presets": {
+			"category": "export",
+			"summary": "Lists export presets from export_presets.cfg (name, platform, runnable, export path). Empty list if the file doesn't exist.",
+			"params": {},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"export_project": {
+			"category": "export",
+			"summary": "Does NOT export anything itself — Godot 4 editor plugins cannot invoke the exporter directly. Looks up the named/indexed preset and returns the 'godot --headless --export-debug/--export-release' command line the caller must run to actually export.",
+			"params": {
+				"preset_index": {"type": "int", "required": false, "default": -1, "desc": "Index into export_presets.cfg; used if preset_name is empty"},
+				"preset_name": {"type": "string", "required": false, "default": "", "desc": "Preset name; takes priority over preset_index"},
+				"debug": {"type": "bool", "required": false, "default": true, "desc": "Selects --export-debug vs --export-release"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"get_export_info": {
+			"category": "export",
+			"summary": "Reports whether export_presets.cfg exists, the Godot executable path, project path, and whether export templates are installed.",
+			"params": {},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+	}
+
+
 func _list_export_presets(params: Dictionary) -> Dictionary:
 	# Read export_presets.cfg
 	var presets_path := "res://export_presets.cfg"

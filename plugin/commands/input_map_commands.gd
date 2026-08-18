@@ -9,6 +9,30 @@ func get_commands() -> Dictionary:
 	}
 
 
+func get_command_schemas() -> Dictionary:
+	return {
+		"get_input_actions": {
+			"category": "input",
+			"summary": "List InputMap actions with their deadzone and bound events. Skips built-in 'ui_*' and editor-internal actions unless include_builtin is set.",
+			"params": {
+				"filter": {"type": "string", "required": false, "default": "", "desc": "Only include actions whose name contains this substring"},
+				"include_builtin": {"type": "bool", "required": false, "default": false, "desc": "Include 'ui_*' and editor-registered actions"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"set_input_action": {
+			"category": "input",
+			"summary": "Create or replace an input action's deadzone and bound events, saving to project.godot and updating the runtime InputMap.",
+			"params": {
+				"action": {"type": "string", "required": true, "desc": "Action name"},
+				"events": {"type": "array", "required": true, "desc": "List of event definitions: {type: 'key'|'mouse_button'|'joypad_button'|'joypad_motion', ...type-specific fields}"},
+				"deadzone": {"type": "float", "required": false, "default": 0.5},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+	}
+
+
 func _get_input_actions(params: Dictionary) -> Dictionary:
 	var filter: String = optional_string(params, "filter", "")
 	var include_builtin: bool = optional_bool(params, "include_builtin", false)

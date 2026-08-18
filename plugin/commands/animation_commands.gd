@@ -13,6 +13,73 @@ func get_commands() -> Dictionary:
 	}
 
 
+func get_command_schemas() -> Dictionary:
+	return {
+		"list_animations": {
+			"category": "animation",
+			"summary": "List the animations on an AnimationPlayer, with length, loop mode, and track count.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to an AnimationPlayer node"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"create_animation": {
+			"category": "animation",
+			"summary": "Create a new animation in an AnimationPlayer's default library. Fails if the name already exists.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to an AnimationPlayer node"},
+				"name": {"type": "string", "required": true},
+				"length": {"type": "float", "required": false, "default": 1.0, "desc": "Animation length in seconds"},
+				"loop_mode": {"type": "int", "required": false, "default": 0, "desc": "0=none, 1=linear, 2=pingpong"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"add_animation_track": {
+			"category": "animation",
+			"summary": "Append a new track to an existing animation.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to an AnimationPlayer node"},
+				"animation": {"type": "string", "required": true, "desc": "Name of the animation to add the track to"},
+				"track_path": {"type": "string", "required": true, "desc": "NodePath:property the track targets, e.g. 'Sprite2D:position'"},
+				"track_type": {"type": "string", "required": false, "default": "value", "desc": "One of: value, position_2d, rotation_2d, scale_2d, method, bezier, blend_shape; unknown values fall back to 'value'"},
+				"update_mode": {"type": "string", "required": false, "default": "", "desc": "For value tracks only: continuous, discrete, or capture"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"set_animation_keyframe": {
+			"category": "animation",
+			"summary": "Insert or overwrite a keyframe on a track at a given time. Values written as a string are parsed as a GDScript expression (e.g. 'Vector2(1, 2)').",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to an AnimationPlayer node"},
+				"animation": {"type": "string", "required": true},
+				"track_index": {"type": "int", "required": false, "default": 0},
+				"time": {"type": "float", "required": false, "default": 0.0, "desc": "Seconds along the track"},
+				"value": {"type": "any", "required": false, "desc": "Keyframe value; a matching key at this time is overwritten"},
+				"easing": {"type": "float", "required": false, "default": 1.0, "desc": "Transition/easing curve for the key"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"get_animation_info": {
+			"category": "animation",
+			"summary": "Full detail of an animation: length, loop mode, step, and every track with its keys.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to an AnimationPlayer node"},
+				"animation": {"type": "string", "required": true},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"remove_animation": {
+			"category": "animation",
+			"summary": "Remove an animation from an AnimationPlayer's default library.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to an AnimationPlayer node"},
+				"name": {"type": "string", "required": true},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": true},
+		},
+	}
+
+
 func _find_animation_player(node_path: String) -> AnimationPlayer:
 	var node := find_node_by_path(node_path)
 	if node is AnimationPlayer:

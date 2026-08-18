@@ -17,6 +17,97 @@ func get_commands() -> Dictionary:
 	}
 
 
+func get_command_schemas() -> Dictionary:
+	return {
+		"get_project_info": {
+			"category": "project",
+			"summary": "Project name, Godot version, project path, main scene, viewport/window size, renderer, and autoloads.",
+			"params": {},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"get_filesystem_tree": {
+			"category": "project",
+			"summary": "Recursive directory listing under a res:// path.",
+			"params": {
+				"path": {"type": "string", "required": false, "default": "res://", "desc": "Directory to start from"},
+				"filter": {"type": "string", "required": false, "default": "", "desc": "Glob pattern for file names, e.g. '*.gd'"},
+				"max_depth": {"type": "int", "required": false, "default": 10, "desc": "Maximum recursion depth"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"search_files": {
+			"category": "project",
+			"summary": "Find files by name (fuzzy substring or glob match).",
+			"params": {
+				"query": {"type": "string", "required": true, "desc": "Substring or glob pattern to match against file names"},
+				"path": {"type": "string", "required": false, "default": "res://", "desc": "Directory to search under"},
+				"file_type": {"type": "string", "required": false, "desc": "Restrict to this extension, e.g. 'gd'"},
+				"max_results": {"type": "int", "required": false, "default": 50},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"search_in_files": {
+			"category": "project",
+			"summary": "Grep-style search of file contents, plain substring or regex.",
+			"params": {
+				"query": {"type": "string", "required": true, "desc": "Substring, or regex pattern when regex=true"},
+				"path": {"type": "string", "required": false, "default": "res://"},
+				"max_results": {"type": "int", "required": false, "default": 50},
+				"regex": {"type": "bool", "required": false, "default": false},
+				"file_type": {"type": "string", "required": false, "desc": "Restrict to this extension; defaults to a set of text extensions"},
+				"include_addons": {"type": "bool", "required": false, "default": false, "desc": "Search inside addons/ too (skipped by default)"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"get_project_settings": {
+			"category": "project",
+			"summary": "Read a single setting by key, or every setting under a section prefix.",
+			"params": {
+				"section": {"type": "string", "required": false, "desc": "Prefix filter, e.g. 'rendering/'"},
+				"key": {"type": "string", "required": false, "desc": "Exact setting key; if given, section is ignored"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"set_project_setting": {
+			"category": "project",
+			"summary": "Write a project setting and save project.godot. Refuses 'editor_plugins/enabled' directly.",
+			"params": {
+				"key": {"type": "string", "required": true},
+				"value": {"type": "any", "required": true, "desc": "Coerced to the setting's existing type, or to 'type' if given"},
+				"type": {"type": "string", "required": false, "desc": "One of: string, string_name, int, float, bool, vector2, vector2i, vector3, vector3i, rect2, rect2i, color, array, dictionary, packed_*_array"},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": true},
+		},
+		"uid_to_project_path": {
+			"category": "project",
+			"summary": "Resolve a uid:// string to its current res:// path.",
+			"params": {"uid": {"type": "string", "required": true}},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"project_path_to_uid": {
+			"category": "project",
+			"summary": "Look up the uid:// assigned to a res:// path.",
+			"params": {"path": {"type": "string", "required": true}},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"add_autoload": {
+			"category": "project",
+			"summary": "Register an autoload singleton and save project.godot. Fails if the name already exists.",
+			"params": {
+				"name": {"type": "string", "required": true},
+				"path": {"type": "string", "required": true, "desc": "res:// path to the script/scene; must already exist"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"remove_autoload": {
+			"category": "project",
+			"summary": "Unregister an autoload singleton and save project.godot.",
+			"params": {"name": {"type": "string", "required": true}},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": true},
+		},
+	}
+
+
 func _get_project_info(params: Dictionary) -> Dictionary:
 	var info := {}
 	info["project_name"] = ProjectSettings.get_setting("application/config/name", "")

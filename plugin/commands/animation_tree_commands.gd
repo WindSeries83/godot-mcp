@@ -15,6 +15,106 @@ func get_commands() -> Dictionary:
 	}
 
 
+func get_command_schemas() -> Dictionary:
+	return {
+		"create_animation_tree": {
+			"category": "animation_tree",
+			"summary": "Create an AnimationTree as a child, with tree_root set to an AnimationNodeStateMachine.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to the parent node"},
+				"anim_player": {"type": "string", "required": false, "default": "", "desc": "NodePath of an AnimationPlayer to link via the tree's anim_player property"},
+				"name": {"type": "string", "required": false, "default": "AnimationTree", "desc": "Name for the new node"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"get_animation_tree_structure": {
+			"category": "animation_tree",
+			"summary": "Read an AnimationTree's root node graph: nested state machines with their states/transitions, or a blend tree's nodes.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to an AnimationTree node"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"add_state_machine_state": {
+			"category": "animation_tree",
+			"summary": "Add a state node (Animation, BlendTree, or nested StateMachine) to a state machine. Fails if the state name already exists.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to an AnimationTree node"},
+				"state_name": {"type": "string", "required": true},
+				"state_machine_path": {"type": "string", "required": false, "default": "", "desc": "Slash-separated path to a nested state machine; empty means the tree root"},
+				"state_type": {"type": "string", "required": false, "default": "animation", "desc": "One of: animation, blend_tree, state_machine"},
+				"animation": {"type": "string", "required": false, "default": "", "desc": "Animation name to assign when state_type is 'animation'"},
+				"position_x": {"type": "float", "required": false, "default": 0.0, "desc": "Graph editor position"},
+				"position_y": {"type": "float", "required": false, "default": 0.0, "desc": "Graph editor position"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"remove_state_machine_state": {
+			"category": "animation_tree",
+			"summary": "Remove a state node from a state machine.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to an AnimationTree node"},
+				"state_name": {"type": "string", "required": true},
+				"state_machine_path": {"type": "string", "required": false, "default": "", "desc": "Slash-separated path to a nested state machine; empty means the tree root"},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": true},
+		},
+		"add_state_machine_transition": {
+			"category": "animation_tree",
+			"summary": "Add a transition between two states (or the special 'Start'/'End' nodes) in a state machine.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to an AnimationTree node"},
+				"from_state": {"type": "string", "required": true, "desc": "State name, or 'Start'/'End'"},
+				"to_state": {"type": "string", "required": true, "desc": "State name, or 'Start'/'End'"},
+				"state_machine_path": {"type": "string", "required": false, "default": "", "desc": "Slash-separated path to a nested state machine; empty means the tree root"},
+				"switch_mode": {"type": "string", "required": false, "default": "immediate", "desc": "One of: at_end, immediate, sync (sync currently maps to at_end)"},
+				"advance_mode": {"type": "string", "required": false, "default": "enabled", "desc": "One of: disabled, enabled, auto"},
+				"advance_expression": {"type": "string", "required": false, "default": "", "desc": "GDScript expression evaluated to decide auto-advance"},
+				"xfade_time": {"type": "float", "required": false, "default": 0.0, "desc": "Crossfade duration in seconds"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"remove_state_machine_transition": {
+			"category": "animation_tree",
+			"summary": "Remove the transition between two states.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to an AnimationTree node"},
+				"from_state": {"type": "string", "required": true},
+				"to_state": {"type": "string", "required": true},
+				"state_machine_path": {"type": "string", "required": false, "default": "", "desc": "Slash-separated path to a nested state machine; empty means the tree root"},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": true},
+		},
+		"set_blend_tree_node": {
+			"category": "animation_tree",
+			"summary": "Add or replace a node inside a BlendTree state, optionally connecting it as an input to another node.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to an AnimationTree node"},
+				"blend_tree_state": {"type": "string", "required": true, "desc": "Name of the state holding the AnimationNodeBlendTree"},
+				"bt_node_name": {"type": "string", "required": true, "desc": "Name for the node inside the blend tree; replaces an existing node of the same name"},
+				"bt_node_type": {"type": "string", "required": true, "desc": "One of: Animation, Add2, Blend2, Add3, Blend3, TimeScale, TimeSeek, Transition, OneShot, Sub2"},
+				"state_machine_path": {"type": "string", "required": false, "default": "", "desc": "Slash-separated path to the state machine containing blend_tree_state; empty means the tree root"},
+				"animation": {"type": "string", "required": false, "default": "", "desc": "Animation name to assign when bt_node_type is 'Animation'"},
+				"position_x": {"type": "float", "required": false, "default": 0.0, "desc": "Graph editor position"},
+				"position_y": {"type": "float", "required": false, "default": 0.0, "desc": "Graph editor position"},
+				"connect_to": {"type": "string", "required": false, "default": "", "desc": "Name of another node in the blend tree to connect this node into"},
+				"connect_port": {"type": "int", "required": false, "default": 0, "desc": "Input port index on connect_to"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"set_tree_parameter": {
+			"category": "animation_tree",
+			"summary": "Set a runtime parameter on the AnimationTree (auto-prefixed with 'parameters/' if not already). String values are parsed as a GDScript expression.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to an AnimationTree node"},
+				"parameter": {"type": "string", "required": true, "desc": "Parameter name, with or without the 'parameters/' prefix"},
+				"value": {"type": "any", "required": true},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+	}
+
+
 ## Find AnimationTree on a node or return null
 func _find_animation_tree(node_path: String) -> AnimationTree:
 	var node := find_node_by_path(node_path)

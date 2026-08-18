@@ -13,6 +13,68 @@ func get_commands() -> Dictionary:
 	}
 
 
+func get_command_schemas() -> Dictionary:
+	return {
+		"create_shader": {
+			"category": "shader",
+			"summary": "Write a new .gdshader/.gdshaderinc file, with boilerplate for the given shader_type if no content is given. Refuses to overwrite an existing file unless force is set.",
+			"params": {
+				"path": {"type": "string", "required": true, "desc": "res:// path, must end in .gdshader or .gdshaderinc"},
+				"content": {"type": "string", "required": false, "default": "", "desc": "Full shader source; if empty, boilerplate for shader_type is used"},
+				"shader_type": {"type": "string", "required": false, "default": "spatial", "desc": "One of: spatial, canvas_item, particles, sky; picks the boilerplate when content is empty"},
+				"force": {"type": "bool", "required": false, "default": false, "desc": "Overwrite an existing file at path"},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false},
+		},
+		"read_shader": {
+			"category": "shader",
+			"summary": "Read the full source of a shader file.",
+			"params": {
+				"path": {"type": "string", "required": true, "desc": "res:// path to the shader file"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"edit_shader": {
+			"category": "shader",
+			"summary": "Replace a shader's entire content, or apply a list of search/replace substitutions. Refuses to overwrite unless force is set.",
+			"params": {
+				"path": {"type": "string", "required": true, "desc": "res:// path to an existing shader file"},
+				"force": {"type": "bool", "required": false, "default": false, "desc": "Bypass the overwrite guard"},
+				"content": {"type": "string", "required": false, "desc": "Full replacement source; if given, replacements is ignored"},
+				"replacements": {"type": "array", "required": false, "desc": "List of {search, replace} string pairs applied to the current content"},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": true},
+		},
+		"assign_shader_material": {
+			"category": "shader",
+			"summary": "Load a shader and assign it as a new ShaderMaterial on a node's material (CanvasItem) or material_override (MeshInstance3D) property.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to the target node"},
+				"shader_path": {"type": "string", "required": true, "desc": "res:// path to the .gdshader to load"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"set_shader_param": {
+			"category": "shader",
+			"summary": "Set a shader_parameter on a node's existing ShaderMaterial. String values that parse as an expression (e.g. 'Vector3(1,0,0)') are evaluated first.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to the node holding the ShaderMaterial"},
+				"param": {"type": "string", "required": true, "desc": "Shader parameter name"},
+				"value": {"type": "any", "required": false, "desc": "Value to assign; strings are evaluated as expressions when possible"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"get_shader_params": {
+			"category": "shader",
+			"summary": "List all shader_parameter values currently set on a node's ShaderMaterial.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to the node holding the ShaderMaterial"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+	}
+
+
 func _create_shader(params: Dictionary) -> Dictionary:
 	var result := require_string(params, "path")
 	if result[1] != null:

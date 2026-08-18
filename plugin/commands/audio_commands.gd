@@ -13,6 +13,81 @@ func get_commands() -> Dictionary:
 	}
 
 
+func get_command_schemas() -> Dictionary:
+	return {
+		"get_audio_bus_layout": {
+			"category": "audio",
+			"summary": "Lists every audio bus (volume, solo, mute, bypass, send) with its effects and their per-effect parameters.",
+			"params": {},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"add_audio_bus": {
+			"category": "audio",
+			"summary": "Creates a new audio bus. Fails if a bus with that name already exists.",
+			"params": {
+				"name": {"type": "string", "required": true},
+				"at_position": {"type": "int", "required": false, "default": -1, "desc": "Insert index; -1 appends at the end"},
+				"volume_db": {"type": "float", "required": false, "desc": "Only applied if given"},
+				"send": {"type": "string", "required": false, "default": "", "desc": "Name of the bus this bus sends to"},
+				"solo": {"type": "bool", "required": false, "desc": "Only applied if given"},
+				"mute": {"type": "bool", "required": false, "desc": "Only applied if given"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"set_audio_bus": {
+			"category": "audio",
+			"summary": "Updates properties of an existing audio bus (volume, solo, mute, bypass_effects, send, rename).",
+			"params": {
+				"name": {"type": "string", "required": true, "desc": "Current bus name"},
+				"volume_db": {"type": "float", "required": false, "desc": "Only applied if given"},
+				"solo": {"type": "bool", "required": false, "desc": "Only applied if given"},
+				"mute": {"type": "bool", "required": false, "desc": "Only applied if given"},
+				"bypass_effects": {"type": "bool", "required": false, "desc": "Only applied if given"},
+				"send": {"type": "string", "required": false, "default": "", "desc": "Name of the bus this bus sends to"},
+				"rename": {"type": "string", "required": false, "desc": "New name for the bus"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"add_audio_bus_effect": {
+			"category": "audio",
+			"summary": "Adds an effect to an audio bus. Supported effect_type values: reverb, chorus, delay, compressor, limiter, phaser, distortion, lowpassfilter, highpassfilter, bandpassfilter, amplify, eq.",
+			"params": {
+				"bus": {"type": "string", "required": true, "desc": "Target bus name"},
+				"effect_type": {"type": "string", "required": true},
+				"at_position": {"type": "int", "required": false, "default": -1, "desc": "Insert index; -1 appends at the end"},
+				"params": {"type": "object", "required": false, "default": {}, "desc": "Effect-specific properties, keys vary by effect_type"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"add_audio_player": {
+			"category": "audio",
+			"summary": "Creates an AudioStreamPlayer/2D/3D under a parent node and adds it to the scene with undo support.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to the parent node"},
+				"name": {"type": "string", "required": true, "desc": "Name for the new player node"},
+				"type": {"type": "string", "required": false, "default": "AudioStreamPlayer", "desc": "One of: AudioStreamPlayer, AudioStreamPlayer2D, AudioStreamPlayer3D"},
+				"stream": {"type": "string", "required": false, "default": "", "desc": "res:// path to an AudioStream resource"},
+				"volume_db": {"type": "float", "required": false, "desc": "Only applied if given"},
+				"bus": {"type": "string", "required": false, "default": "", "desc": "Audio bus name"},
+				"autoplay": {"type": "bool", "required": false, "desc": "Only applied if given"},
+				"max_distance": {"type": "float", "required": false, "desc": "2D/3D players only; only applied if given"},
+				"attenuation": {"type": "float", "required": false, "desc": "2D players only; only applied if given"},
+				"attenuation_model": {"type": "int", "required": false, "desc": "3D players only; only applied if given"},
+				"unit_size": {"type": "float", "required": false, "desc": "3D players only; only applied if given"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"get_audio_info": {
+			"category": "audio",
+			"summary": "Recursively lists AudioStreamPlayer/2D/3D nodes under a node with their playback properties.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to the node to search from"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+	}
+
+
 func _get_audio_bus_layout(_params: Dictionary) -> Dictionary:
 	var buses: Array[Dictionary] = []
 	for i in range(AudioServer.bus_count):

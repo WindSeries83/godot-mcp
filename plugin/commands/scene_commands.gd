@@ -20,6 +20,86 @@ func get_commands() -> Dictionary:
 	}
 
 
+func get_command_schemas() -> Dictionary:
+	return {
+		"get_scene_tree": {
+			"category": "scene",
+			"summary": "Full node tree of the currently edited scene, with types and paths.",
+			"params": {
+				"max_depth": {"type": "int", "required": false, "default": -1, "desc": "Maximum recursion depth; -1 for unlimited"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"get_scene_file_content": {
+			"category": "scene",
+			"summary": "Raw text content of a .tscn/.scn file on disk.",
+			"params": {"path": {"type": "string", "required": true, "desc": "res:// path to the scene file"}},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"create_scene": {
+			"category": "scene",
+			"summary": "Create a new scene file with a single root node of the given type. Refuses to overwrite an existing file unless force is set.",
+			"params": {
+				"path": {"type": "string", "required": true, "desc": "res:// path to save the new scene"},
+				"root_type": {"type": "string", "required": false, "default": "Node2D", "desc": "Node class for the scene root"},
+				"root_name": {"type": "string", "required": false, "default": "", "desc": "Defaults to the file's basename"},
+				"force": {"type": "bool", "required": false, "default": false, "desc": "Overwrite an existing file at path"},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false},
+		},
+		"open_scene": {
+			"category": "scene",
+			"summary": "Open a scene file in the editor.",
+			"params": {"path": {"type": "string", "required": true, "desc": "res:// path to the scene file"}},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"delete_scene": {
+			"category": "scene",
+			"summary": "Delete a scene file (and its .import file, if any) from disk. Refuses non-scene paths and scenes currently open in the editor.",
+			"params": {"path": {"type": "string", "required": true, "desc": "res:// path to the scene file"}},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": true},
+		},
+		"add_scene_instance": {
+			"category": "scene",
+			"summary": "Instance a scene as a child of a node in the currently edited scene.",
+			"params": {
+				"scene_path": {"type": "string", "required": true, "desc": "res:// path to the scene to instance"},
+				"parent_path": {"type": "string", "required": false, "default": ".", "desc": "Node path of the parent to add the instance under"},
+				"name": {"type": "string", "required": false, "default": "", "desc": "Defaults to the instance's own root name"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"play_scene": {
+			"category": "scene",
+			"summary": "Start playing a scene: the project's main scene, the currently edited scene, or an explicit scene path.",
+			"params": {
+				"mode": {"type": "string", "required": false, "default": "main", "desc": "'main', 'current', or a res:// scene path"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"stop_scene": {
+			"category": "scene",
+			"summary": "Stop the currently running scene and clean up temp screenshot/input/inspector files. No-op if nothing is playing.",
+			"params": {},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"save_scene": {
+			"category": "scene",
+			"summary": "Save the currently edited scene, to its existing path or a new one. Refuses to save over a different scene that is open but not the active tab.",
+			"params": {
+				"path": {"type": "string", "required": false, "default": "", "desc": "res:// path to save as; defaults to the scene's current path"},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": true},
+		},
+		"get_scene_exports": {
+			"category": "scene",
+			"summary": "Instantiate a scene off-tree and collect every node's script-exported properties, then discard the instance.",
+			"params": {"path": {"type": "string", "required": true, "desc": "res:// path to the scene file"}},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+	}
+
+
 func _get_scene_tree(params: Dictionary) -> Dictionary:
 	var root := get_edited_root()
 	if root == null:

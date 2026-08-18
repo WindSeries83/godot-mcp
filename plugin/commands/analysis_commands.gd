@@ -13,6 +13,62 @@ func get_commands() -> Dictionary:
 	}
 
 
+func get_command_schemas() -> Dictionary:
+	return {
+		"find_unused_resources": {
+			"category": "analysis",
+			"summary": "Scans the project for resource files (tres/tscn/images/audio/fonts/etc.) not referenced by any .tscn/.gd/.tres/.cfg/.godot file or ProjectSettings entry.",
+			"params": {
+				"path": {"type": "string", "required": false, "default": "res://"},
+				"include_addons": {"type": "bool", "required": false, "default": false},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"analyze_signal_flow": {
+			"category": "analysis",
+			"summary": "Maps persistent (scene-serialized) signal connections in the edited scene, per node.",
+			"params": {},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"analyze_scene_complexity": {
+			"category": "analysis",
+			"summary": "Reports node count, max nesting depth, node-type breakdown, attached scripts, and heuristic complexity warnings for a scene.",
+			"params": {
+				"path": {"type": "string", "required": false, "default": "", "desc": "res:// scene path; defaults to the currently edited scene"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"find_script_references": {
+			"category": "analysis",
+			"summary": "Greps .tscn/.gd/.tres/.cfg/.godot files under a path for a text query (e.g. a script or class_name), reporting file/line/content per hit.",
+			"params": {
+				"query": {"type": "string", "required": true},
+				"path": {"type": "string", "required": false, "default": "res://"},
+				"include_addons": {"type": "bool", "required": false, "default": false},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"detect_circular_dependencies": {
+			"category": "analysis",
+			"summary": "Builds a scene-to-scene dependency graph from [ext_resource] entries in .tscn files and reports any cycles via DFS.",
+			"params": {
+				"path": {"type": "string", "required": false, "default": "res://"},
+				"include_addons": {"type": "bool", "required": false, "default": false},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"get_project_statistics": {
+			"category": "analysis",
+			"summary": "Aggregates project-wide stats: file counts by extension, total script lines, scene/resource counts, autoloads, and enabled/available editor plugins.",
+			"params": {
+				"path": {"type": "string", "required": false, "default": "res://"},
+				"include_addons": {"type": "bool", "required": false, "default": false},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+	}
+
+
 # =============================================================================
 # find_unused_resources
 # =============================================================================

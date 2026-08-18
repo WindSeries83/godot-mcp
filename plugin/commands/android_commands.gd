@@ -10,6 +10,39 @@ func get_commands() -> Dictionary:
 	}
 
 
+func get_command_schemas() -> Dictionary:
+	return {
+		"list_android_devices": {
+			"category": "android",
+			"summary": "Lists devices/emulators visible to adb (serial, state, and any key:value properties adb reports).",
+			"params": {},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"get_android_preset_info": {
+			"category": "android",
+			"summary": "Reads an Android export preset's metadata (package name, export path, runnable) from export_presets.cfg. Picks the first Android preset if no filter is given.",
+			"params": {
+				"preset_name": {"type": "string", "required": false, "default": "", "desc": "Preset name; takes priority over preset_index"},
+				"preset_index": {"type": "int", "required": false, "default": -1, "desc": "Index into export_presets.cfg"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"deploy_to_android": {
+			"category": "android",
+			"summary": "Exports the APK via the Godot CLI (unless skip_export), installs it on a device with 'adb install -r', and optionally launches its main activity via 'adb shell monkey'.",
+			"params": {
+				"preset_name": {"type": "string", "required": false, "default": "", "desc": "Preset name; takes priority over preset_index"},
+				"preset_index": {"type": "int", "required": false, "default": -1, "desc": "Index into export_presets.cfg"},
+				"device_serial": {"type": "string", "required": false, "default": "", "desc": "Target device; adb default device used if empty"},
+				"debug": {"type": "bool", "required": false, "default": true, "desc": "Selects --export-debug vs --export-release"},
+				"launch": {"type": "bool", "required": false, "default": true, "desc": "Launch the app's main activity after install"},
+				"skip_export": {"type": "bool", "required": false, "default": false, "desc": "Skip the export step and install the APK already at the preset's export path"},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false},
+		},
+	}
+
+
 ## Resolve adb path from editor settings or PATH fallback.
 func _resolve_adb_path() -> String:
 	var editor_settings := get_editor().get_editor_settings()

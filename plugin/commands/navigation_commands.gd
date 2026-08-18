@@ -12,6 +12,75 @@ func get_commands() -> Dictionary:
 	}
 
 
+func get_command_schemas() -> Dictionary:
+	return {
+		"setup_navigation_region": {
+			"category": "navigation",
+			"summary": "Add a NavigationRegion3D or NavigationRegion2D child under node_path, with a fresh NavigationMesh/NavigationPolygon resource. Dimension defaults to auto-detecting from the node's ancestors.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to the parent node"},
+				"mode": {"type": "string", "required": false, "default": "auto", "desc": "One of: auto, 2d, 3d"},
+				"name": {"type": "string", "required": false, "default": "NavigationRegion3D or NavigationRegion2D depending on mode"},
+				"agent_radius": {"type": "float", "required": false, "default": 0.5, "desc": "3D default 0.5; 2D has no override default (NavigationPolygon default applies) unless given"},
+				"agent_height": {"type": "float", "required": false, "default": 1.5, "desc": "3D only"},
+				"agent_max_climb": {"type": "float", "required": false, "default": 0.25, "desc": "3D only"},
+				"agent_max_slope": {"type": "float", "required": false, "default": 45.0, "desc": "3D only"},
+				"cell_size": {"type": "float", "required": false, "default": 0.25, "desc": "3D default 0.25; 2D has no override default (NavigationPolygon default applies) unless given"},
+				"cell_height": {"type": "float", "required": false, "default": 0.25, "desc": "3D only"},
+				"source_geometry_mode": {"type": "string", "required": false, "desc": "2D only. One of: root_node, groups_with_children, groups_explicit"},
+				"navigation_layers": {"type": "int", "required": false, "desc": "Bitmask; if omitted, the resource's default navigation_layers is kept"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"bake_navigation_mesh": {
+			"category": "navigation",
+			"summary": "Bake a NavigationRegion3D's NavigationMesh from scene geometry, or a NavigationRegion2D's NavigationPolygon — from an explicit outline if given (replacing any existing outlines), otherwise from source geometry.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to a NavigationRegion3D or NavigationRegion2D"},
+				"outline": {"type": "array", "required": false, "desc": "2D only. List of [x,y] pairs or {x,y} dicts, at least 3 points; replaces any existing outlines. If omitted, bakes from source geometry instead"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"setup_navigation_agent": {
+			"category": "navigation",
+			"summary": "Add a NavigationAgent3D or NavigationAgent2D child under node_path. Dimension defaults to auto-detecting from the node's ancestors. Only fields present in the call are set; unset fields keep the class's own defaults.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to the parent node"},
+				"mode": {"type": "string", "required": false, "default": "auto", "desc": "One of: auto, 2d, 3d"},
+				"name": {"type": "string", "required": false, "default": "NavigationAgent3D or NavigationAgent2D depending on mode"},
+				"path_desired_distance": {"type": "float", "required": false},
+				"target_desired_distance": {"type": "float", "required": false},
+				"radius": {"type": "float", "required": false},
+				"neighbor_distance": {"type": "float", "required": false},
+				"max_neighbors": {"type": "int", "required": false},
+				"max_speed": {"type": "float", "required": false},
+				"avoidance_enabled": {"type": "bool", "required": false},
+				"navigation_layers": {"type": "int", "required": false, "desc": "Bitmask"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"set_navigation_layers": {
+			"category": "navigation",
+			"summary": "Set navigation_layers on a NavigationRegion2D/3D or NavigationAgent2D/3D. Exactly one of layers, layer_bits, or layer_names is required.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to a navigation region or agent"},
+				"layers": {"type": "int", "required": false, "desc": "Bitmask value, applied directly"},
+				"layer_bits": {"type": "array", "required": false, "desc": "Array of layer numbers (1-32) combined into a bitmask"},
+				"layer_names": {"type": "array", "required": false, "desc": "Array of named layers, resolved against ProjectSettings layer_names/2d_navigation or /3d_navigation, and combined into a bitmask"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"get_navigation_info": {
+			"category": "navigation",
+			"summary": "Recursively collect every NavigationRegion2D/3D and NavigationAgent2D/3D under node_path, plus named layers from ProjectSettings for both 2D and 3D navigation.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to the subtree root to scan"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+	}
+
+
 func _is_3d_context(node: Node) -> bool:
 	if node is Node3D:
 		return true

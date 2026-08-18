@@ -3,8 +3,10 @@ extends Node
 
 ## Multi-connection WebSocket client.
 ## Connects to multiple Node.js MCP server instances on ports 6505-6514.
-## Each Claude Code session gets its own port; Godot talks to all of them.
-## Ports 6505-6509: MCP servers (stdio), 6510-6514: CLI tool connections.
+## Each MCP server process binds exactly one free port in that range (see
+## GodotBridge.start() in src/index.ts), so every port here can be an
+## independent agent session; Godot dials all ten and talks to whichever
+## answer.
 
 signal client_connected()
 signal client_disconnected()
@@ -170,8 +172,10 @@ func _process(delta: float) -> void:
 						print("[MCP] Port %d recovered from stale state" % p)
 
 				# Force-close if no message received for INACTIVITY_TIMEOUT.
-				# The MCP server pings every 10s, so 30s of silence means the
-				# connection is half-open and reconnect is the only way out.
+				# We ping the server every PING_INTERVAL and it now replies (see
+				# src/index.ts dispatch: id-less "ping" gets a "pong" back), so
+				# 30s of silence means the connection is genuinely half-open and
+				# reconnect is the only way out.
 				if _last_activity.get(p, 0.0) > INACTIVITY_TIMEOUT:
 					push_warning("[MCP] Port %d silent for %.1fs — forcing reconnect" % [p, _last_activity[p]])
 					_stale_ports[p] = true

@@ -20,6 +20,18 @@ servers to authenticate before sending commands.
    connecting. The absolute path is printed in the editor Output panel when
    the requirement is on.
 
+This repo's `src/index.ts` runs as a separate process with no way to resolve
+`user://mcp_auth_token` to a real path on its own, so it needs the token
+handed to it explicitly. Set one of:
+
+- `GODOT_MCP_TOKEN` — the literal token value, or
+- `GODOT_MCP_TOKEN_PATH` — the absolute path to the token file (the one
+  printed in the Output panel)
+
+before starting `node dist/index.js`. Without either, the server logs a
+warning and leaves the connection unauthenticated (Godot will keep closing
+and retrying it every few seconds until a token is supplied).
+
 ## What it protects against
 
 - Other **users** on a shared machine (or other processes running under a

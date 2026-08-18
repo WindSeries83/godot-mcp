@@ -48,6 +48,39 @@ func get_commands() -> Dictionary:
 	}
 
 
+func get_command_schemas() -> Dictionary:
+	return {
+		"run_headless_scene": {
+			"category": "headless",
+			"summary": "Runs a scene in a separate headless Godot process ('--headless --path <project> <scene_path>') and returns its captured output, exit code, and duration. Kills the process tree if timeout_sec elapses.",
+			"params": {
+				"scene_path": {"type": "string", "required": true, "desc": "res:// path to the scene to run"},
+				"timeout_sec": {"type": "float", "required": false, "default": 120.0, "desc": "Clamped to [1, 900]"},
+				"quit_after_frames": {"type": "int", "required": false, "default": 0, "desc": "If > 0, passed as --quit-after"},
+				"args": {"type": "array", "required": false, "default": [], "desc": "Extra arguments appended after '--', forwarded to the project"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"run_headless_script": {
+			"category": "headless",
+			"summary": "Runs a script in a separate headless Godot process ('--headless --path <project> --script <script_path>') and returns its captured output, exit code, and duration. Kills the process tree if timeout_sec elapses.",
+			"params": {
+				"script_path": {"type": "string", "required": true, "desc": "res:// path to the script to run"},
+				"timeout_sec": {"type": "float", "required": false, "default": 120.0, "desc": "Clamped to [1, 900]"},
+				"quit_after_frames": {"type": "int", "required": false, "default": 0, "desc": "If > 0, passed as --quit-after"},
+				"args": {"type": "array", "required": false, "default": [], "desc": "Extra arguments appended after '--', forwarded to the project"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"get_godot_executable": {
+			"category": "headless",
+			"summary": "Reports the running Godot executable's path, the project's globalized path, and the host OS name.",
+			"params": {},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+	}
+
+
 func _get_godot_executable(_params: Dictionary) -> Dictionary:
 	return success({
 		"executable": OS.get_executable_path(),

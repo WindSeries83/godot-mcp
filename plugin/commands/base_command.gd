@@ -9,6 +9,27 @@ func get_commands() -> Dictionary:
 	return {}
 
 
+## Override in subclasses: return {"method_name": schema}, one entry per key
+## returned by get_commands(). Schema shape:
+##   {
+##       "category": "project",  # matches the category used in this file's own get_command_schemas()
+##       "summary": "One line, what it does.",
+##       "params": {
+##           "key": {"type": "string|int|float|bool|object|array", "required": true, "desc": "..."},
+##           "other": {"type": "string", "required": false, "default": ".", "desc": "..."},
+##       },
+##       "annotations": {"readOnly": bool, "destructive": bool, "idempotent": bool},
+##   }
+## `params` may be {} for a no-argument method. This is consumed by
+## command_router.gd's describe_methods()/describe_method() and lets
+## godot_list_methods / godot_describe on the Node side reflect the real,
+## current parameter set instead of a hand-maintained, drifting copy. Category
+## lives here (not on the Node side) so there is exactly one place that knows
+## a method's grouping — the module that implements it.
+func get_command_schemas() -> Dictionary:
+	return {}
+
+
 ## Helper: return a success result
 func success(data: Dictionary = {}) -> Dictionary:
 	return {"result": data}

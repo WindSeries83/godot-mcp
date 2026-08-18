@@ -13,6 +13,49 @@ func get_commands() -> Dictionary:
 	}
 
 
+func get_command_schemas() -> Dictionary:
+	return {
+		"read_resource": {
+			"category": "resource",
+			"summary": "Load a .tres/.res resource and return its editor-visible properties. Refuses script/shader files, which load as Resource too but are edited via script commands.",
+			"params": {
+				"path": {"type": "string", "required": true, "desc": "res:// path to the resource file"},
+				"force": {"type": "bool", "required": false, "default": false, "desc": "Bypass the offline text-resource read guard"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"edit_resource": {
+			"category": "resource",
+			"summary": "Update properties on an existing resource and save it back to disk. Unknown property names are silently skipped.",
+			"params": {
+				"path": {"type": "string", "required": true, "desc": "res:// path to the resource file"},
+				"properties": {"type": "object", "required": true, "desc": "Property name/value pairs to set"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"create_resource": {
+			"category": "resource",
+			"summary": "Instantiate a Resource type and save it as a new .tres/.res file. Refuses to overwrite an existing file unless overwrite is set.",
+			"params": {
+				"path": {"type": "string", "required": true, "desc": "res:// path; must end in .tres or .res"},
+				"type": {"type": "string", "required": true, "desc": "ClassDB Resource type to instantiate"},
+				"overwrite": {"type": "bool", "required": false, "default": false, "desc": "Overwrite an existing file at path"},
+				"properties": {"type": "object", "required": false, "default": {}, "desc": "Initial property name/value pairs to set on the new resource"},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false},
+		},
+		"get_resource_preview": {
+			"category": "resource",
+			"summary": "Render a resource (image file, Texture2D, or Image) to a base64 PNG thumbnail, downscaled to fit max_size.",
+			"params": {
+				"path": {"type": "string", "required": true, "desc": "res:// path to an image file or an image-producing resource"},
+				"max_size": {"type": "int", "required": false, "default": 256, "desc": "Maximum width/height of the returned thumbnail"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+	}
+
+
 func _read_resource(params: Dictionary) -> Dictionary:
 	var result := require_string(params, "path")
 	if result[1] != null:

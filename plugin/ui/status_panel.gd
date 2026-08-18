@@ -13,7 +13,7 @@ const COLOR_ERROR := Color(1, 0.6, 0.6)
 const COLOR_DIM := Color(0.6, 0.6, 0.6)
 
 const BASE_PORT := 6505
-const MAX_PORT := 6509
+const MAX_PORT := 6514
 
 # Header
 var _status_icon: Label

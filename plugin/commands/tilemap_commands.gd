@@ -13,6 +13,81 @@ func get_commands() -> Dictionary:
 	}
 
 
+func get_command_schemas() -> Dictionary:
+	return {
+		"tilemap_set_cell": {
+			"category": "tilemap",
+			"summary": "Set a single cell's tile on a TileMapLayer, or a legacy TileMap's layer.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to a TileMapLayer or legacy TileMap node"},
+				"layer": {"type": "int", "required": false, "default": 0, "desc": "Legacy TileMap layer index; must be omitted or 0 for TileMapLayer"},
+				"x": {"type": "int", "required": false, "default": 0, "desc": "Cell column"},
+				"y": {"type": "int", "required": false, "default": 0, "desc": "Cell row"},
+				"source_id": {"type": "int", "required": false, "default": 0, "desc": "TileSet atlas source id"},
+				"atlas_x": {"type": "int", "required": false, "default": 0, "desc": "Atlas tile column"},
+				"atlas_y": {"type": "int", "required": false, "default": 0, "desc": "Atlas tile row"},
+				"alternative": {"type": "int", "required": false, "default": 0, "desc": "Alternative tile id"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"tilemap_fill_rect": {
+			"category": "tilemap",
+			"summary": "Set the same tile across every cell in a rectangular region (inclusive corners, order-independent).",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to a TileMapLayer or legacy TileMap node"},
+				"layer": {"type": "int", "required": false, "default": 0, "desc": "Legacy TileMap layer index; must be omitted or 0 for TileMapLayer"},
+				"x1": {"type": "int", "required": false, "default": 0, "desc": "First corner column"},
+				"y1": {"type": "int", "required": false, "default": 0, "desc": "First corner row"},
+				"x2": {"type": "int", "required": false, "default": 0, "desc": "Opposite corner column"},
+				"y2": {"type": "int", "required": false, "default": 0, "desc": "Opposite corner row"},
+				"source_id": {"type": "int", "required": false, "default": 0, "desc": "TileSet atlas source id"},
+				"atlas_x": {"type": "int", "required": false, "default": 0, "desc": "Atlas tile column"},
+				"atlas_y": {"type": "int", "required": false, "default": 0, "desc": "Atlas tile row"},
+				"alternative": {"type": "int", "required": false, "default": 0, "desc": "Alternative tile id"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"tilemap_get_cell": {
+			"category": "tilemap",
+			"summary": "Read a single cell's source id, atlas coords, and alternative tile. source_id is -1 when the cell is empty.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to a TileMapLayer or legacy TileMap node"},
+				"layer": {"type": "int", "required": false, "default": 0, "desc": "Legacy TileMap layer index; must be omitted or 0 for TileMapLayer"},
+				"x": {"type": "int", "required": false, "default": 0, "desc": "Cell column"},
+				"y": {"type": "int", "required": false, "default": 0, "desc": "Cell row"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"tilemap_clear": {
+			"category": "tilemap",
+			"summary": "Clear cells. On a TileMapLayer this clears its one layer; on a legacy TileMap, a given layer or, if omitted, every layer.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to a TileMapLayer or legacy TileMap node"},
+				"layer": {"type": "int", "required": false, "desc": "Legacy TileMap layer index; omit to clear all layers. Must be omitted or 0 for TileMapLayer"},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": true},
+		},
+		"tilemap_get_info": {
+			"category": "tilemap",
+			"summary": "Layer list, used-cell counts, TileSet source list, and tile size for a TileMapLayer or legacy TileMap.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to a TileMapLayer or legacy TileMap node"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"tilemap_get_used_cells": {
+			"category": "tilemap",
+			"summary": "List the non-empty cells on a layer, each with its coordinates and source id.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to a TileMapLayer or legacy TileMap node"},
+				"layer": {"type": "int", "required": false, "default": 0, "desc": "Legacy TileMap layer index; must be omitted or 0 for TileMapLayer"},
+				"max_count": {"type": "int", "required": false, "default": 500, "desc": "Maximum cells to return; negative values are clamped to 0"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+	}
+
+
 func _find_tilemap_node(node_path: String) -> Node:
 	var node := find_node_by_path(node_path)
 	if node is TileMapLayer or _is_legacy_tilemap(node):

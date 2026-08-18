@@ -29,6 +29,191 @@ func get_commands() -> Dictionary:
 	}
 
 
+func get_command_schemas() -> Dictionary:
+	return {
+		"get_game_scene_tree": {
+			"category": "runtime",
+			"summary": "Returns the running game's scene tree via file-based IPC to the MCPGameInspector autoload.",
+			"params": {
+				"max_depth": {"type": "int", "required": false, "default": -1, "desc": "Maximum recursion depth; -1 for unlimited"},
+				"script_filter": {"type": "string", "required": false, "default": "", "desc": "Only include nodes whose script path matches this"},
+				"type_filter": {"type": "string", "required": false, "default": "", "desc": "Only include nodes of this class"},
+				"named_only": {"type": "bool", "required": false, "default": false, "desc": "Only include nodes with a non-default name"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"get_game_node_properties": {
+			"category": "runtime",
+			"summary": "Reads properties of a node in the running game via game IPC.",
+			"params": {
+				"node_path": {"type": "string", "required": true},
+				"properties": {"type": "array", "required": false, "default": [], "desc": "Property names to read; all properties if omitted"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"set_game_node_property": {
+			"category": "runtime",
+			"summary": "Sets a property on a node in the running game via game IPC.",
+			"params": {
+				"node_path": {"type": "string", "required": true},
+				"property": {"type": "string", "required": true},
+				"value": {"type": "any", "required": true},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"capture_frames": {
+			"category": "runtime",
+			"summary": "Captures a sequence of frames from the running game via game IPC. Timeout scales with count * frame_interval.",
+			"params": {
+				"count": {"type": "int", "required": false, "default": 5, "desc": "Number of frames to capture"},
+				"frame_interval": {"type": "int", "required": false, "default": 10, "desc": "Engine frames between captures"},
+				"half_resolution": {"type": "bool", "required": false, "default": true},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"monitor_properties": {
+			"category": "runtime",
+			"summary": "Samples a node's properties over a number of frames in the running game via game IPC. Timeout scales with frame_count * frame_interval.",
+			"params": {
+				"node_path": {"type": "string", "required": true},
+				"properties": {"type": "array", "required": true, "desc": "Property names to sample each frame"},
+				"frame_count": {"type": "int", "required": false, "default": 60},
+				"frame_interval": {"type": "int", "required": false, "default": 1, "desc": "Engine frames between samples"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"execute_game_script": {
+			"category": "runtime",
+			"summary": "Compiles and runs arbitrary GDScript inside the running game process via game IPC (10s timeout).",
+			"params": {
+				"code": {"type": "string", "required": true},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false},
+		},
+		"start_recording": {
+			"category": "runtime",
+			"summary": "Starts recording input/state events in the running game via game IPC.",
+			"params": {},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"stop_recording": {
+			"category": "runtime",
+			"summary": "Stops the current recording in the running game via game IPC (5s timeout).",
+			"params": {},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"replay_recording": {
+			"category": "runtime",
+			"summary": "Replays a previously captured list of events in the running game via game IPC. Timeout is derived from the events' time_ms and speed, capped at 120s.",
+			"params": {
+				"events": {"type": "array", "required": true, "desc": "Array of event objects, each with a numeric 'time_ms'"},
+				"speed": {"type": "float", "required": false, "default": 1.0, "desc": "Playback speed multiplier"},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false},
+		},
+		"find_nodes_by_script": {
+			"category": "runtime",
+			"summary": "Finds nodes in the running game whose attached script matches, via game IPC.",
+			"params": {
+				"script": {"type": "string", "required": true, "desc": "Script res:// path to match"},
+				"properties": {"type": "array", "required": false, "default": [], "desc": "Property names to include for each match; all properties if omitted"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"get_autoload": {
+			"category": "runtime",
+			"summary": "Reads an autoload singleton's properties in the running game via game IPC.",
+			"params": {
+				"name": {"type": "string", "required": true, "desc": "Autoload name"},
+				"properties": {"type": "array", "required": false, "default": [], "desc": "Property names to read; all properties if omitted"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"batch_get_properties": {
+			"category": "runtime",
+			"summary": "Reads properties for multiple nodes in one round trip to the running game via game IPC.",
+			"params": {
+				"nodes": {"type": "array", "required": true, "desc": "Array of {node_path, properties} request objects"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"find_ui_elements": {
+			"category": "runtime",
+			"summary": "Lists visible UI elements (with their text) in the running game via game IPC.",
+			"params": {
+				"type_filter": {"type": "string", "required": false, "default": "", "desc": "Only include elements of this Control class"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"click_button_by_text": {
+			"category": "runtime",
+			"summary": "Finds a UI button by its visible text in the running game and clicks it via game IPC. Can trigger arbitrary in-game actions.",
+			"params": {
+				"text": {"type": "string", "required": true},
+				"partial": {"type": "bool", "required": false, "default": true, "desc": "Match as a substring instead of an exact match"},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false},
+		},
+		"wait_for_node": {
+			"category": "runtime",
+			"summary": "Polls the running game via game IPC until a node exists (or a timeout elapses).",
+			"params": {
+				"node_path": {"type": "string", "required": true},
+				"timeout": {"type": "float", "required": false, "default": 5.0, "desc": "Seconds to wait before giving up"},
+				"poll_frames": {"type": "int", "required": false, "default": 5, "desc": "Engine frames between polls"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"find_nearby_nodes": {
+			"category": "runtime",
+			"summary": "Finds nodes near a world position in the running game via game IPC.",
+			"params": {
+				"position": {"type": "any", "required": true, "desc": "{x, y, z} or {x, y} world position"},
+				"radius": {"type": "float", "required": false, "default": 0.0},
+				"type_filter": {"type": "string", "required": false, "default": "", "desc": "Only include nodes of this class"},
+				"group_filter": {"type": "string", "required": false, "default": "", "desc": "Only include nodes in this group"},
+				"max_results": {"type": "int", "required": false, "default": 0},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"navigate_to": {
+			"category": "runtime",
+			"summary": "Directs the game-side player toward a target via game IPC (pathfinding/steering handled game-side).",
+			"params": {
+				"target": {"type": "any", "required": true, "desc": "Node path string or {x, y, z} world position"},
+				"player_path": {"type": "string", "required": false, "default": "", "desc": "Node path to the player; game-side default if omitted"},
+				"camera_path": {"type": "string", "required": false, "default": "", "desc": "Node path to the camera; game-side default if omitted"},
+				"move_speed": {"type": "float", "required": false, "default": 0.0, "desc": "Game-side default used if omitted"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"move_to": {
+			"category": "runtime",
+			"summary": "Moves the game-side player to a target and waits for arrival via game IPC. IPC timeout is the game-side timeout plus 5s overhead.",
+			"params": {
+				"target": {"type": "any", "required": true, "desc": "Node path string or {x, y, z} world position"},
+				"player_path": {"type": "string", "required": false, "default": "", "desc": "Node path to the player; game-side default if omitted"},
+				"camera_path": {"type": "string", "required": false, "default": "", "desc": "Node path to the camera; game-side default if omitted"},
+				"arrival_radius": {"type": "float", "required": false, "default": 0.0, "desc": "Game-side default used if omitted"},
+				"timeout": {"type": "float", "required": false, "default": 15.0, "desc": "Seconds to wait for arrival; also extends the IPC wait"},
+				"run": {"type": "bool", "required": false, "default": false, "desc": "Game-side default used if omitted"},
+				"look_at_target": {"type": "bool", "required": false, "default": false, "desc": "Game-side default used if omitted"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"watch_signals": {
+			"category": "runtime",
+			"summary": "Records signal emissions from the given nodes over a duration in the running game via game IPC.",
+			"params": {
+				"node_paths": {"type": "array", "required": true},
+				"signal_filter": {"type": "array", "required": false, "default": [], "desc": "Only record these signal names; all signals if omitted"},
+				"duration_ms": {"type": "int", "required": false, "default": 5000},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+	}
+
+
 func _get_game_scene_tree(params: Dictionary) -> Dictionary:
 	var max_depth: int = optional_int(params, "max_depth", -1)
 	var cmd_params := {"max_depth": max_depth}

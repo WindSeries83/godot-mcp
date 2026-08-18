@@ -15,6 +15,58 @@ func get_commands() -> Dictionary:
 	}
 
 
+func get_command_schemas() -> Dictionary:
+	return {
+		"run_test_scenario": {
+			"category": "test",
+			"summary": "Optionally plays a scene, then runs a sequence of steps (input, wait, assert, screenshot) against the running game and returns pass/fail results per step.",
+			"params": {
+				"steps": {"type": "array", "required": true, "desc": "Step objects: {type:'input'|'wait'|'assert'|'screenshot', ...}"},
+				"scene_path": {"type": "string", "required": false, "default": "", "desc": "'main', 'current', or a res:// scene path; if empty, a scene must already be playing"},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false},
+		},
+		"assert_node_state": {
+			"category": "test",
+			"summary": "Asserts a running game node's property against an expected value using the given operator, and records the result for get_test_report.",
+			"params": {
+				"node_path": {"type": "string", "required": true},
+				"property": {"type": "string", "required": true},
+				"expected": {"type": "any", "required": true},
+				"operator": {"type": "string", "required": false, "default": "eq", "desc": "One of: eq, neq, gt, lt, gte, lte, contains, type_is"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"assert_screen_text": {
+			"category": "test",
+			"summary": "Asserts that specific text is visible among the running game's UI elements, and records the result for get_test_report.",
+			"params": {
+				"text": {"type": "string", "required": true},
+				"partial": {"type": "bool", "required": false, "default": true, "desc": "Match as a substring instead of an exact match"},
+				"case_sensitive": {"type": "bool", "required": false, "default": true},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"run_stress_test": {
+			"category": "test",
+			"summary": "Sends rapid random input actions to the running game for a duration and reports whether it crashed and how many new log errors appeared.",
+			"params": {
+				"duration": {"type": "float", "required": false, "default": 5.0, "desc": "Seconds to run; must be between 0 and 60"},
+				"actions": {"type": "array", "required": false, "default": [], "desc": "Extra action names to mix in with the default ui_* actions"},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false},
+		},
+		"get_test_report": {
+			"category": "test",
+			"summary": "Summarizes accumulated assertion results (from run_test_scenario, assert_node_state, assert_screen_text) into pass/fail counts and details.",
+			"params": {
+				"clear": {"type": "bool", "required": false, "default": true, "desc": "Clear the accumulated results after reporting"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+	}
+
+
 # ── Internal test result accumulator ──────────────────────────────────────────
 
 var _test_results: Array[Dictionary] = []

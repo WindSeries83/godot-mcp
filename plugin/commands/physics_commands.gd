@@ -15,6 +15,101 @@ func get_commands() -> Dictionary:
 	}
 
 
+func get_command_schemas() -> Dictionary:
+	return {
+		"setup_collision": {
+			"category": "physics",
+			"summary": "Add a CollisionShape2D or CollisionShape3D child (with a new shape resource) to a physics body or area. Dimension is auto-detected from the node/its ancestors, falling back to the dimension param.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to a PhysicsBody/Area node"},
+				"shape": {"type": "string", "required": true, "desc": "2D: rectangle (rect), circle, capsule, segment, custom. 3D: box (rectangle/rect), sphere (circle), capsule, cylinder, convex (custom)"},
+				"dimension": {"type": "string", "required": false, "default": "2d", "desc": "Used only when dimension cannot be auto-detected from the node's ancestors"},
+				"width": {"type": "float", "required": false, "default": 32.0, "desc": "rectangle/box: 32.0 in 2D, 1.0 in 3D"},
+				"height": {"type": "float", "required": false, "desc": "rectangle/box/capsule; default 32.0 (2D rectangle), 1.0 (3D box), 40.0 (2D capsule), 2.0 (3D capsule/cylinder)"},
+				"depth": {"type": "float", "required": false, "default": 1.0, "desc": "3D box only"},
+				"radius": {"type": "float", "required": false, "desc": "circle/capsule/cylinder/sphere; default 16.0 (2D) or 0.5 (3D)"},
+				"ax": {"type": "float", "required": false, "default": 0.0, "desc": "2D segment start x"},
+				"ay": {"type": "float", "required": false, "default": 0.0, "desc": "2D segment start y"},
+				"bx": {"type": "float", "required": false, "default": 32.0, "desc": "2D segment end x"},
+				"by": {"type": "float", "required": false, "default": 0.0, "desc": "2D segment end y"},
+				"points": {"type": "array", "required": false, "default": [], "desc": "custom/convex shape: [x,y] pairs (2D, needs >=3) or [x,y,z] triples (3D, needs >=4)"},
+				"disabled": {"type": "bool", "required": false, "default": false},
+				"one_way_collision": {"type": "bool", "required": false, "default": false, "desc": "2D only"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"set_physics_layers": {
+			"category": "physics",
+			"summary": "Set collision_layer and/or collision_mask on a node. At least one of collision_layer/collision_mask is required. Each accepts a bitmask int or an array of layer numbers (1-32).",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to a node with collision_layer/collision_mask properties"},
+				"collision_layer": {"type": "any", "required": false, "desc": "Bitmask int, or array of layer numbers 1-32"},
+				"collision_mask": {"type": "any", "required": false, "desc": "Bitmask int, or array of layer numbers 1-32"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"get_physics_layers": {
+			"category": "physics",
+			"summary": "Read collision_layer and collision_mask (as bitmasks and per-layer name info) from a node.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to a node with collision_layer/collision_mask properties"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"add_raycast": {
+			"category": "physics",
+			"summary": "Add a RayCast2D or RayCast3D child to a node. Dimension is auto-detected from the node/its ancestors, falling back to the dimension param.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to the parent node"},
+				"dimension": {"type": "string", "required": false, "default": "2d", "desc": "Used only when dimension cannot be auto-detected"},
+				"name": {"type": "string", "required": false, "default": "RayCast"},
+				"enabled": {"type": "bool", "required": false, "default": true},
+				"collision_mask": {"type": "int", "required": false, "default": 1},
+				"collide_with_areas": {"type": "bool", "required": false, "default": false},
+				"collide_with_bodies": {"type": "bool", "required": false, "default": true},
+				"hit_from_inside": {"type": "bool", "required": false, "default": false},
+				"target_x": {"type": "float", "required": false, "default": 0.0},
+				"target_y": {"type": "float", "required": false, "default": 50.0, "desc": "2D default 50.0, 3D default -1.0"},
+				"target_z": {"type": "float", "required": false, "default": 0.0, "desc": "3D only"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"setup_physics_body": {
+			"category": "physics",
+			"summary": "Set motion/mass/damping properties on an existing CharacterBody2D/3D or RigidBody2D/3D node. Only params present in the call are applied; unrecognized node types (and physics_material_override on StaticBody/AnimatableBody) are rejected. Fails if no applicable property is provided.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to a CharacterBody2D/3D or RigidBody2D/3D node"},
+				"floor_stop_on_slope": {"type": "bool", "required": false, "desc": "CharacterBody only"},
+				"floor_max_angle": {"type": "float", "required": false, "desc": "CharacterBody only"},
+				"floor_snap_length": {"type": "float", "required": false, "desc": "CharacterBody only"},
+				"wall_min_slide_angle": {"type": "float", "required": false, "desc": "CharacterBody only"},
+				"motion_mode": {"type": "string", "required": false, "desc": "CharacterBody only. 'grounded' or 'floating', or a raw MOTION_MODE_* int"},
+				"max_slides": {"type": "int", "required": false, "desc": "CharacterBody only"},
+				"slide_on_ceiling": {"type": "bool", "required": false, "desc": "CharacterBody only"},
+				"mass": {"type": "float", "required": false, "desc": "RigidBody only"},
+				"gravity_scale": {"type": "float", "required": false, "desc": "RigidBody only"},
+				"linear_damp": {"type": "float", "required": false, "desc": "RigidBody only"},
+				"angular_damp": {"type": "float", "required": false, "desc": "RigidBody only"},
+				"freeze": {"type": "bool", "required": false, "desc": "RigidBody only"},
+				"freeze_mode": {"type": "string", "required": false, "desc": "RigidBody only. 'static' or 'kinematic', or a raw FREEZE_MODE_* int"},
+				"continuous_cd": {"type": "any", "required": false, "desc": "RigidBody only. RigidBody2D: 'disabled'/'cast_ray'/'cast_shape' (or a raw CCD_MODE_* int); RigidBody3D: bool"},
+				"contact_monitor": {"type": "bool", "required": false, "desc": "RigidBody only"},
+				"max_contacts_reported": {"type": "int", "required": false, "desc": "RigidBody only"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"get_collision_info": {
+			"category": "physics",
+			"summary": "Report a node's collision layer/mask and body-specific settings, plus every CollisionShape/CollisionPolygon/RayCast found among its descendants (or just itself if include_children is false).",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to the node to inspect"},
+				"include_children": {"type": "bool", "required": false, "default": true},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+	}
+
+
 ## Determine if a node (or its ancestors) lives in a 2D or 3D context.
 ## Returns "2d", "3d", or "" if undetermined.
 func _detect_dimension(node: Node) -> String:

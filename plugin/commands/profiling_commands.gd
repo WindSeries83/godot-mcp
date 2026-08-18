@@ -9,6 +9,25 @@ func get_commands() -> Dictionary:
 	}
 
 
+func get_command_schemas() -> Dictionary:
+	return {
+		"get_performance_monitors": {
+			"category": "profiling",
+			"summary": "Reads the running game's Performance monitors via game IPC. Requires a scene to be playing; notes when an embedded game's FPS reading is throttled by editor focus.",
+			"params": {
+				"category": {"type": "string", "required": false, "default": "", "desc": "Only return monitor keys starting with this prefix, e.g. 'time/'"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"get_editor_performance": {
+			"category": "profiling",
+			"summary": "Reads the editor process's own Performance monitors (fps, frame time, draw calls, node counts, memory).",
+			"params": {},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+	}
+
+
 func _get_performance_monitors(params: Dictionary) -> Dictionary:
 	# Performance is a per-process singleton: reading it here would report the
 	# EDITOR's metrics, not the game's. Route through the game IPC channel.

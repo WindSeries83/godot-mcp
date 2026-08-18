@@ -1,0 +1,12 @@
+; Minimal project, used only to give `godot --headless --script` a valid
+; project context for test/godot/run_tests.gd. It intentionally has no
+; addons/ of its own — run_tests.gd loads the real plugin/ files straight
+; out of the repo by resolving an absolute path at runtime, so there is
+; nothing here to keep in sync with plugin/.
+
+config_version=5
+
+[application]
+
+config/name="godot-mcp headless test fixture"
+run/main_scene=""

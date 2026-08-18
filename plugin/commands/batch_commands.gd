@@ -17,6 +17,77 @@ func get_commands() -> Dictionary:
 	}
 
 
+func get_command_schemas() -> Dictionary:
+	return {
+		"find_nodes_by_type": {
+			"category": "batch",
+			"summary": "Finds every node of a given class/type in the edited scene.",
+			"params": {
+				"type": {"type": "string", "required": true, "desc": "Class name, e.g. 'Sprite2D'"},
+				"recursive": {"type": "bool", "required": false, "default": true},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"find_signal_connections": {
+			"category": "batch",
+			"summary": "Lists signal connections across the edited scene, optionally filtered by signal name or node path substring.",
+			"params": {
+				"signal_name": {"type": "string", "required": false, "default": "", "desc": "Substring filter on signal name"},
+				"node_path": {"type": "string", "required": false, "default": "", "desc": "Substring filter on source node path"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"batch_set_property": {
+			"category": "batch",
+			"summary": "Sets a property on every node of a given type in the edited scene, with undo support. The value may be a GDScript expression string (e.g. 'Color(1,0,0)'), evaluated via Expression.",
+			"params": {
+				"type": {"type": "string", "required": true, "desc": "Class name to match"},
+				"property": {"type": "string", "required": true},
+				"value": {"type": "any", "required": true},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": true},
+		},
+		"batch_add_nodes": {
+			"category": "batch",
+			"summary": "Creates multiple nodes across the edited scene in one call, each with its own type, parent, name, and initial properties. Per-entry failures are reported without aborting the rest.",
+			"params": {
+				"nodes": {"type": "array", "required": true, "desc": "Array of objects: {type (required), parent_path (default '.'), name, properties}"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"find_node_references": {
+			"category": "batch",
+			"summary": "Searches all .tscn/.gd/.tres/.gdshader files under res:// for a text pattern, up to 100 matches, reporting up to 5 line numbers per file.",
+			"params": {
+				"pattern": {"type": "string", "required": true},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"get_scene_dependencies": {
+			"category": "batch",
+			"summary": "Lists a resource's dependencies as reported by ResourceLoader.",
+			"params": {
+				"path": {"type": "string", "required": true, "desc": "res:// path to a scene or resource file"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"cross_scene_set_property": {
+			"category": "batch",
+			"summary": "Sets a property on every node of a given type across every .tscn file under path_filter, including offline scenes. Defaults to dry_run=true (report only); requires force=true together with dry_run=false to actually write closed scenes or live-edit the active open scene. Other open, non-active scenes are always skipped.",
+			"params": {
+				"type": {"type": "string", "required": true, "desc": "Class name to match"},
+				"property": {"type": "string", "required": true},
+				"value": {"type": "any", "required": true, "desc": "May be a GDScript expression string, evaluated via Expression"},
+				"path_filter": {"type": "string", "required": false, "default": "res://", "desc": "Directory to scan for .tscn files"},
+				"exclude_addons": {"type": "bool", "required": false, "default": true},
+				"force": {"type": "bool", "required": false, "default": false, "desc": "Required (together with dry_run=false) to actually write changes"},
+				"dry_run": {"type": "bool", "required": false, "default": true, "desc": "Report affected scenes/nodes without writing; defaults to the inverse of force"},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": true},
+		},
+	}
+
+
 func _find_nodes_by_type(params: Dictionary) -> Dictionary:
 	var result := require_string(params, "type")
 	if result[1] != null:

@@ -14,6 +14,89 @@ func get_commands() -> Dictionary:
 	}
 
 
+func get_command_schemas() -> Dictionary:
+	return {
+		"create_theme": {
+			"category": "theme",
+			"summary": "Create a new Theme resource and save it to disk, overwriting any existing file at that path. Extension must be tres/res/theme.",
+			"params": {
+				"path": {"type": "string", "required": true, "desc": "res:// destination path"},
+				"default_font_size": {"type": "int", "required": false, "default": 0, "desc": "Theme's default_font_size; left unset (engine default) when 0 or less"},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false},
+		},
+		"set_theme_color": {
+			"category": "theme",
+			"summary": "Add a theme color override on a Control node.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to a Control node"},
+				"name": {"type": "string", "required": true, "desc": "Theme color name, e.g. 'font_color'"},
+				"color": {"type": "string", "required": true, "desc": "Color string parsed by Godot's Color(String) constructor, e.g. '#ff0000' or 'red'"},
+				"theme_type": {"type": "string", "required": false, "default": "", "desc": "Theme type override; defaults to the control's own class"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"set_theme_constant": {
+			"category": "theme",
+			"summary": "Add a theme constant override on a Control node.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to a Control node"},
+				"name": {"type": "string", "required": true, "desc": "Theme constant name"},
+				"value": {"type": "int", "required": false, "default": 0},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"set_theme_font_size": {
+			"category": "theme",
+			"summary": "Add a theme font size override on a Control node.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to a Control node"},
+				"name": {"type": "string", "required": true, "desc": "Theme font size name, e.g. 'font_size'"},
+				"size": {"type": "int", "required": false, "default": 16},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"set_theme_stylebox": {
+			"category": "theme",
+			"summary": "Add a StyleBoxFlat theme stylebox override on a Control node, replacing any existing override of that name.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to a Control node"},
+				"name": {"type": "string", "required": true, "desc": "Theme stylebox name, e.g. 'panel'"},
+				"bg_color": {"type": "string", "required": false, "default": "", "desc": "Color string; left unset if empty"},
+				"border_color": {"type": "string", "required": false, "default": "", "desc": "Color string; left unset if empty"},
+				"border_width": {"type": "int", "required": false, "default": 0, "desc": "Applied to all four border widths when > 0"},
+				"corner_radius": {"type": "int", "required": false, "default": 0, "desc": "Applied to all four corners when > 0"},
+				"padding": {"type": "int", "required": false, "default": 0, "desc": "Applied to all four content margins when > 0"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"setup_control": {
+			"category": "theme",
+			"summary": "Apply layout settings (anchor preset, size, size flags, margins, separation, grow direction) to a Control node in one call.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to a Control node"},
+				"anchor_preset": {"type": "string", "required": false, "default": "", "desc": "One of: top_left, top_right, bottom_left, bottom_right, center_left, center_top, center_right, center_bottom, center, left_wide, top_wide, right_wide, bottom_wide, vcenter_wide, hcenter_wide, full_rect"},
+				"min_size": {"type": "string", "required": false, "default": "", "desc": "GDScript expression evaluating to a Vector2, e.g. 'Vector2(100, 50)'"},
+				"size_flags_h": {"type": "string", "required": false, "default": "", "desc": "One of: fill, expand, fill_expand, shrink_center, shrink_end"},
+				"size_flags_v": {"type": "string", "required": false, "default": "", "desc": "One of: fill, expand, fill_expand, shrink_center, shrink_end"},
+				"margins": {"type": "object", "required": false, "desc": "Only applied if the node is a MarginContainer; keys left/top/right/bottom (ints)"},
+				"separation": {"type": "int", "required": false, "default": 0, "desc": "Only applied if the node is a BoxContainer"},
+				"grow_h": {"type": "string", "required": false, "default": "", "desc": "One of: begin, end, both"},
+				"grow_v": {"type": "string", "required": false, "default": "", "desc": "One of: begin, end, both"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"get_theme_info": {
+			"category": "theme",
+			"summary": "Read a Control node's theme resource path, type list, and every color/constant/font size/stylebox override.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to a Control node"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+	}
+
+
 func _create_theme(params: Dictionary) -> Dictionary:
 	var result := require_string(params, "path")
 	if result[1] != null:

@@ -27,6 +27,168 @@ func get_commands() -> Dictionary:
 	}
 
 
+func get_command_schemas() -> Dictionary:
+	return {
+		"add_node": {
+			"category": "node",
+			"summary": "Instantiate a node (by ClassDB type or a script's class_name) and add it as a child, optionally setting initial properties.",
+			"params": {
+				"type": {"type": "string", "required": true, "desc": "ClassDB node type, or a script's class_name"},
+				"parent_path": {"type": "string", "required": false, "default": ".", "desc": "Node path of the parent to add the new node under"},
+				"name": {"type": "string", "required": false, "default": "", "desc": "Defaults to the type/class name"},
+				"properties": {"type": "object", "required": false, "default": {}, "desc": "Initial property name/value pairs to set on the new node"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"delete_node": {
+			"category": "node",
+			"summary": "Remove a node from the scene tree. Refuses to delete the scene root.",
+			"params": {"node_path": {"type": "string", "required": true, "desc": "Node path relative to the scene root"}},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": true},
+		},
+		"duplicate_node": {
+			"category": "node",
+			"summary": "Duplicate a node (and its subtree) as a sibling. Refuses to duplicate the scene root, since the copy would attach outside the scene and be lost on save.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Node path relative to the scene root"},
+				"name": {"type": "string", "required": false, "default": "", "desc": "Defaults to '<original name>_copy'"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"move_node": {
+			"category": "node",
+			"summary": "Reparent a node to a different location in the scene tree. Refuses to move the root, or a node into its own subtree.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Node path relative to the scene root"},
+				"new_parent_path": {"type": "string", "required": true, "desc": "Node path of the new parent"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"update_property": {
+			"category": "node",
+			"summary": "Set a single property on a node. Resolves string values against @export node-reference hints and Resource-typed properties, and refuses ambiguous coercions rather than silently nulling the property.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Node path relative to the scene root"},
+				"property": {"type": "string", "required": true, "desc": "Property name"},
+				"value": {"type": "any", "required": true, "desc": "Parsed against the property's current type"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"get_node_properties": {
+			"category": "node",
+			"summary": "All editor-visible properties and values of a node, optionally filtered by category prefix.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Node path relative to the scene root"},
+				"category": {"type": "string", "required": false, "default": "", "desc": "Only include properties whose name starts with this prefix"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"add_resource": {
+			"category": "node",
+			"summary": "Create a Resource instance and assign it to a property on a node.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Node path relative to the scene root"},
+				"property": {"type": "string", "required": true, "desc": "Property to assign the resource to"},
+				"resource_type": {"type": "string", "required": true, "desc": "ClassDB Resource type to instantiate"},
+				"resource_properties": {"type": "object", "required": false, "default": {}, "desc": "Initial property name/value pairs to set on the new resource"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"set_anchor_preset": {
+			"category": "node",
+			"summary": "Apply a Control anchor/offset preset (e.g. full_rect, center). Refuses non-Control nodes.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Node path relative to the scene root"},
+				"preset": {"type": "string", "required": true, "desc": "One of the Control.PRESET_* names, e.g. 'full_rect', 'center', 'top_left'"},
+				"keep_offsets": {"type": "bool", "required": false, "default": false, "desc": "Keep current size (PRESET_MODE_KEEP_SIZE) instead of resetting to minsize"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"rename_node": {
+			"category": "node",
+			"summary": "Change a node's name.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Node path relative to the scene root"},
+				"new_name": {"type": "string", "required": true},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"connect_signal": {
+			"category": "node",
+			"summary": "Connect a signal on one node to a method on another, persistently (serialized into the scene on save). No-op if already connected.",
+			"params": {
+				"source_path": {"type": "string", "required": true, "desc": "Node path of the signal source"},
+				"signal_name": {"type": "string", "required": true},
+				"target_path": {"type": "string", "required": true, "desc": "Node path of the method target"},
+				"method_name": {"type": "string", "required": true},
+				"deferred": {"type": "bool", "required": false, "default": false, "desc": "Add CONNECT_DEFERRED"},
+				"one_shot": {"type": "bool", "required": false, "default": false, "desc": "Add CONNECT_ONE_SHOT"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"disconnect_signal": {
+			"category": "node",
+			"summary": "Disconnect a previously connected signal. No-op if not connected.",
+			"params": {
+				"source_path": {"type": "string", "required": true, "desc": "Node path of the signal source"},
+				"signal_name": {"type": "string", "required": true},
+				"target_path": {"type": "string", "required": true, "desc": "Node path of the method target"},
+				"method_name": {"type": "string", "required": true},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"get_node_groups": {
+			"category": "node",
+			"summary": "List the (non-internal) groups a node belongs to.",
+			"params": {"node_path": {"type": "string", "required": true, "desc": "Node path relative to the scene root"}},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"set_node_groups": {
+			"category": "node",
+			"summary": "Replace a node's (non-internal) group membership with the given list, adding and removing as needed.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Node path relative to the scene root"},
+				"groups": {"type": "array", "required": true, "desc": "Full desired list of group names"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"find_nodes_in_group": {
+			"category": "node",
+			"summary": "Recursively find every node in the scene belonging to a given group.",
+			"params": {"group": {"type": "string", "required": true}},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"get_editor_selection": {
+			"category": "node",
+			"summary": "Nodes currently selected in the editor.",
+			"params": {
+				"top_only": {"type": "bool", "required": false, "default": false, "desc": "Only include top-level selected nodes, excluding selected descendants of other selected nodes"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"select_nodes": {
+			"category": "node",
+			"summary": "Set the editor selection to one or more nodes, and optionally focus/inspect them.",
+			"params": {
+				"node_paths": {"type": "array", "required": false, "desc": "Node paths to select; takes precedence over node_path if both given"},
+				"node_path": {"type": "string", "required": false, "desc": "Single node path to select; required if node_paths is not given"},
+				"mode": {"type": "string", "required": false, "default": "replace", "desc": "One of: replace, add, remove"},
+				"inspect": {"type": "bool", "required": false, "default": true, "desc": "Show the selected node in the Inspector (only when exactly one node is selected)"},
+				"focus": {"type": "bool", "required": false, "default": "same as inspect", "desc": "Also open/focus the node for editing (only when exactly one node is selected)"},
+				"inspector_only": {"type": "bool", "required": false, "default": false, "desc": "Passed through to EditorInterface.inspect_object"},
+				"for_property": {"type": "string", "required": false, "default": "", "desc": "Passed through to EditorInterface.inspect_object"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"clear_editor_selection": {
+			"category": "node",
+			"summary": "Clear the editor's current node selection.",
+			"params": {},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+	}
+
+
 func _find_script_by_class_name(class_name_str: String) -> Script:
 	# Search project files for a script with matching class_name
 	var global_classes: Array = ProjectSettings.get_global_class_list()

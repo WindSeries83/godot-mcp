@@ -14,6 +14,68 @@ func get_commands() -> Dictionary:
 	}
 
 
+func get_command_schemas() -> Dictionary:
+	return {
+		"simulate_key": {
+			"category": "input",
+			"summary": "Injects a keyboard event into the running game via file-based IPC.",
+			"params": {
+				"keycode": {"type": "string", "required": true, "desc": "Key name, e.g. 'A', 'Space', 'Enter'"},
+				"pressed": {"type": "bool", "required": false, "default": true},
+				"shift": {"type": "bool", "required": false, "default": false},
+				"ctrl": {"type": "bool", "required": false, "default": false},
+				"alt": {"type": "bool", "required": false, "default": false},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false},
+		},
+		"simulate_mouse_click": {
+			"category": "input",
+			"summary": "Injects a mouse button event into the running game. When pressed and auto_release are both true, sends a press+release pair in one frame so UI buttons actually fire.",
+			"params": {
+				"button": {"type": "int", "required": false, "default": 1, "desc": "MouseButton index, e.g. 1 = left"},
+				"pressed": {"type": "bool", "required": false, "default": true},
+				"double_click": {"type": "bool", "required": false, "default": false},
+				"auto_release": {"type": "bool", "required": false, "default": true, "desc": "Also send a release event right after a press"},
+				"x": {"type": "float", "required": false, "default": 0.0},
+				"y": {"type": "float", "required": false, "default": 0.0},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false},
+		},
+		"simulate_mouse_move": {
+			"category": "input",
+			"summary": "Injects a mouse motion event into the running game. Marked unhandled (bypassing normal GUI dispatch) automatically when button_mask is set for a drag, unless 'unhandled' is passed explicitly.",
+			"params": {
+				"x": {"type": "float", "required": false, "default": 0.0},
+				"y": {"type": "float", "required": false, "default": 0.0},
+				"relative_x": {"type": "float", "required": false, "default": 0.0},
+				"relative_y": {"type": "float", "required": false, "default": 0.0},
+				"button_mask": {"type": "int", "required": false, "default": 0},
+				"unhandled": {"type": "bool", "required": false, "default": false, "desc": "Force unhandled-input dispatch instead of the button_mask-based default"},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false},
+		},
+		"simulate_action": {
+			"category": "input",
+			"summary": "Injects an input action event (as defined in the Input Map) into the running game.",
+			"params": {
+				"action": {"type": "string", "required": true, "desc": "Input Map action name"},
+				"pressed": {"type": "bool", "required": false, "default": true},
+				"strength": {"type": "float", "required": false, "default": 1.0},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false},
+		},
+		"simulate_sequence": {
+			"category": "input",
+			"summary": "Injects a sequence of input events (key/mouse/action) into the running game, either all in one frame or spaced by frame_delay.",
+			"params": {
+				"events": {"type": "array", "required": true, "desc": "Array of event objects, each with a 'type' field"},
+				"frame_delay": {"type": "int", "required": false, "default": 1, "desc": "Frames between events; <=0 sends every event in a single frame"},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false},
+		},
+	}
+
+
 func _simulate_key(params: Dictionary) -> Dictionary:
 	var result := require_string(params, "keycode")
 	if result[1] != null:

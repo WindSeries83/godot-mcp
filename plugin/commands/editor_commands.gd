@@ -20,6 +20,114 @@ func get_commands() -> Dictionary:
 	}
 
 
+func get_command_schemas() -> Dictionary:
+	return {
+		"get_editor_errors": {
+			"category": "editor",
+			"summary": "Collects recent errors/warnings from the Output panel, script editor compile errors, GDScript analyzer messages, and the debugger Errors tab.",
+			"params": {
+				"max_lines": {"type": "int", "required": false, "default": 50, "desc": "How many trailing Output panel / log lines to scan"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"get_output_log": {
+			"category": "editor",
+			"summary": "Reads recent lines from the editor Output panel, falling back to the log file if the panel isn't accessible.",
+			"params": {
+				"max_lines": {"type": "int", "required": false, "default": 100, "desc": "How many trailing lines to return"},
+				"filter": {"type": "string", "required": false, "default": "", "desc": "Only return lines containing this substring"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"get_editor_screenshot": {
+			"category": "editor",
+			"summary": "Captures the editor's main viewport as a PNG, returned as base64 or saved to disk.",
+			"params": {
+				"save_path": {"type": "string", "required": false, "default": "", "desc": "If given, save PNG here (res://, user://, or absolute) instead of returning base64"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"get_game_screenshot": {
+			"category": "editor",
+			"summary": "Captures a screenshot from the running game via file-based IPC. Requires a scene to be playing.",
+			"params": {
+				"save_path": {"type": "string", "required": false, "default": "", "desc": "If given, save PNG here (res://, user://, or absolute) instead of returning base64"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"execute_editor_script": {
+			"category": "editor",
+			"summary": "Compiles and runs arbitrary GDScript in the editor process. Refuses code matching known file/resource-write APIs unless allow_unsafe_editor_io is set.",
+			"params": {
+				"code": {"type": "string", "required": true, "desc": "GDScript source for a run() function body"},
+				"allow_unsafe_editor_io": {"type": "bool", "required": false, "default": false, "desc": "Bypass the unsafe file/resource-write pattern guard"},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false},
+		},
+		"clear_output": {
+			"category": "editor",
+			"summary": "Clears the editor Output panel by printing blank lines.",
+			"params": {},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": true},
+		},
+		"reload_plugin": {
+			"category": "editor",
+			"summary": "Disables and re-enables the godot_mcp plugin to reload its scripts. The MCP connection briefly drops and auto-reconnects.",
+			"params": {},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"reload_project": {
+			"category": "editor",
+			"summary": "Rescans the project filesystem to pick up changed/added scripts and resources.",
+			"params": {},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"get_signals": {
+			"category": "editor",
+			"summary": "Lists a node's declared signals, their argument shapes, and current connections.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Path to the node, relative to the edited scene root"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"compare_screenshots": {
+			"category": "editor",
+			"summary": "Pixel-diffs two images (path or base64 PNG) of equal size and returns a highlighted diff image plus a changed-pixel percentage.",
+			"params": {
+				"image_a": {"type": "string", "required": true, "desc": "res://, user:// path, or base64 PNG data"},
+				"image_b": {"type": "string", "required": true, "desc": "res://, user:// path, or base64 PNG data"},
+				"threshold": {"type": "int", "required": false, "default": 10, "desc": "Per-channel 0-255 difference above which a pixel counts as changed"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"set_auto_dismiss": {
+			"category": "editor",
+			"summary": "Toggles whether the plugin auto-dismisses blocking editor dialogs.",
+			"params": {
+				"enabled": {"type": "bool", "required": false, "default": true},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"get_editor_camera": {
+			"category": "editor",
+			"summary": "Reads the 3D editor viewport camera's position, rotation, FOV, and clip planes.",
+			"params": {},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"set_editor_camera": {
+			"category": "editor",
+			"summary": "Sets the 3D editor viewport camera's position, rotation, look-at target, and/or FOV. look_at overrides rotation_degrees when both are given.",
+			"params": {
+				"position": {"type": "object", "required": false, "desc": "{x, y, z}; unspecified components keep their current value"},
+				"rotation_degrees": {"type": "object", "required": false, "desc": "{x, y, z}; unspecified components keep their current value"},
+				"look_at": {"type": "object", "required": false, "desc": "{x, y, z} world point to aim the camera at; overrides rotation_degrees"},
+				"fov": {"type": "float", "required": false, "desc": "Vertical field of view in degrees"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+	}
+
+
 func _get_editor_errors(params: Dictionary) -> Dictionary:
 	var errors: Array = []
 	var max_lines: int = optional_int(params, "max_lines", 50)

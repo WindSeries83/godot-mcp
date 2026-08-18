@@ -80,6 +80,13 @@ godot-mcp/
 └── LICENSE              ← MIT
 ```
 
+## Développement
+
+```bash
+npm test          # tests unitaires (vitest) : framing WS, dispatch JSON-RPC
+npm run test:godot # tests GDScript en --headless (nécessite `godot`/`godot4` sur le PATH ou GODOT_BIN)
+```
+
 ## Licence
 
 MIT
@@ -153,12 +160,20 @@ Add to your AI client config (`.mcp.json`, `claude.json`, `opencode.json`):
 > **`godot_screenshot`** requires an editor with active rendering: it does not
 > work in `--headless` mode ("Could not get image from viewport" error).
 
+## Development
+
+```bash
+npm test           # unit tests (vitest): WS framing, JSON-RPC dispatch
+npm run test:godot # headless GDScript tests (needs `godot`/`godot4` on PATH or GODOT_BIN)
+```
+
 ## Structure
 
 ```
 godot-mcp/
 ├── plugin/              ← Godot plugin (copy to your project)
 ├── src/index.ts         ← MCP server (Node.js)
+├── test/                ← vitest suite + headless GDScript fixture project
 ├── package.json
 ├── tsconfig.json
 ├── README.md

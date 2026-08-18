@@ -14,6 +14,74 @@ func get_commands() -> Dictionary:
 	}
 
 
+func get_command_schemas() -> Dictionary:
+	return {
+		"list_scripts": {
+			"category": "script",
+			"summary": "List script files (.gd, .cs, .gdshader) under a path, with size and class_name/extends when detectable.",
+			"params": {
+				"path": {"type": "string", "required": false, "default": "res://", "desc": "Directory to start from"},
+				"recursive": {"type": "bool", "required": false, "default": true},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"read_script": {
+			"category": "script",
+			"summary": "Full text content of a script file.",
+			"params": {"path": {"type": "string", "required": true, "desc": "res:// path to the script file"}},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"create_script": {
+			"category": "script",
+			"summary": "Create a new .gd/.cs script file, with a generated template if no content is given. Refuses non-script extensions and, unless forced, refuses to overwrite an existing file.",
+			"params": {
+				"path": {"type": "string", "required": true, "desc": "res:// path; must end in .gd or .cs"},
+				"content": {"type": "string", "required": false, "default": "", "desc": "Full script source; a minimal template is generated if omitted"},
+				"extends": {"type": "string", "required": false, "default": "Node", "desc": "Base class for the generated template"},
+				"class_name": {"type": "string", "required": false, "default": "", "desc": "class_name line for the generated template"},
+				"force": {"type": "bool", "required": false, "default": false, "desc": "Overwrite an existing file at path"},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false},
+		},
+		"edit_script": {
+			"category": "script",
+			"summary": "Edit an existing script in place: search/replace, a 1-based inclusive line-range replacement, full content replacement, or an insert at a line — whichever set of params is given, in that priority order. Reports if the result no longer parses.",
+			"params": {
+				"path": {"type": "string", "required": true, "desc": "res:// path; must end in .gd or .cs"},
+				"replacements": {"type": "array", "required": false, "desc": "List of {search, replace, regex} entries applied in order"},
+				"content": {"type": "string", "required": false, "desc": "New content: full file replacement, or the replacement text when start_line/end_line are also given"},
+				"start_line": {"type": "int", "required": false, "desc": "1-based inclusive start line for a line-range replacement; required if end_line is given"},
+				"end_line": {"type": "int", "required": false, "default": "start_line", "desc": "1-based inclusive end line for a line-range replacement"},
+				"insert_at_line": {"type": "int", "required": false, "desc": "0-based line index to insert text before; used with text"},
+				"text": {"type": "string", "required": false, "desc": "Text to insert at insert_at_line"},
+				"force": {"type": "bool", "required": false, "default": false, "desc": "Bypass the offline text-resource write guard"},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": true},
+		},
+		"attach_script": {
+			"category": "script",
+			"summary": "Attach a script to a node.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Node path relative to the scene root"},
+				"script_path": {"type": "string", "required": true, "desc": "res:// path to the script to attach"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"get_open_scripts": {
+			"category": "script",
+			"summary": "List scripts currently open in the editor's script editor.",
+			"params": {},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"validate_script": {
+			"category": "script",
+			"summary": "Compile a GDScript file (cache bypassed) and report whether it parses. Result can be indeterminate if the script has live instances the editor is using.",
+			"params": {"path": {"type": "string", "required": true, "desc": "res:// path; must end in .gd or .cs"}},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+	}
+
+
 func _guard_script_file_path(path: String, operation: String) -> Dictionary:
 	var ext := path.get_extension().to_lower()
 	if ext in ["gd", "cs"]:

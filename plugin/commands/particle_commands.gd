@@ -14,6 +14,82 @@ func get_commands() -> Dictionary:
 	}
 
 
+func get_command_schemas() -> Dictionary:
+	return {
+		"create_particles": {
+			"category": "particles",
+			"summary": "Add a GPUParticles2D or GPUParticles3D node (with a fresh ParticleProcessMaterial) under parent_path.",
+			"params": {
+				"parent_path": {"type": "string", "required": true, "desc": "Scene-relative path to the parent node"},
+				"name": {"type": "string", "required": false, "default": "Particles"},
+				"is_3d": {"type": "bool", "required": false, "default": false, "desc": "Creates GPUParticles3D instead of GPUParticles2D"},
+				"amount": {"type": "int", "required": false, "default": 16},
+				"lifetime": {"type": "float", "required": false, "default": 1.0},
+				"one_shot": {"type": "bool", "required": false, "default": false},
+				"explosiveness": {"type": "float", "required": false, "default": 0.0},
+				"randomness": {"type": "float", "required": false, "default": 0.0},
+				"emitting": {"type": "bool", "required": false, "default": true},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"set_particle_material": {
+			"category": "particles",
+			"summary": "Apply the given fields onto a duplicate of the node's current (or a fresh) ParticleProcessMaterial on a GPUParticles2D/3D node. Only fields present in the call are changed.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to a GPUParticles2D/3D node"},
+				"direction": {"type": "any", "required": false, "desc": "Vector3-like: {x,y,z} dict, or a 'Vector3(...)' expression string"},
+				"spread": {"type": "float", "required": false},
+				"initial_velocity_min": {"type": "float", "required": false},
+				"initial_velocity_max": {"type": "float", "required": false},
+				"gravity": {"type": "any", "required": false, "desc": "Vector3-like: {x,y,z} dict, or a 'Vector3(...)' expression string"},
+				"scale_min": {"type": "float", "required": false},
+				"scale_max": {"type": "float", "required": false},
+				"color": {"type": "string", "required": false, "desc": "Color string, e.g. '#ff0000' or 'Color(1,0,0,1)'"},
+				"emission_shape": {"type": "string", "required": false, "desc": "One of: point, sphere, sphere_surface, box, ring"},
+				"emission_sphere_radius": {"type": "float", "required": false, "desc": "Only applied when emission_shape is sphere or sphere_surface"},
+				"emission_box_extents": {"type": "any", "required": false, "desc": "{x,y,z} dict; only applied when emission_shape is box"},
+				"emission_ring_radius": {"type": "float", "required": false, "desc": "Only applied when emission_shape is ring"},
+				"emission_ring_inner_radius": {"type": "float", "required": false, "desc": "Only applied when emission_shape is ring"},
+				"emission_ring_height": {"type": "float", "required": false, "desc": "Only applied when emission_shape is ring"},
+				"angular_velocity_min": {"type": "float", "required": false},
+				"angular_velocity_max": {"type": "float", "required": false},
+				"orbit_velocity_min": {"type": "float", "required": false},
+				"orbit_velocity_max": {"type": "float", "required": false},
+				"damping_min": {"type": "float", "required": false},
+				"damping_max": {"type": "float", "required": false},
+				"attractor_interaction_enabled": {"type": "bool", "required": false},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"set_particle_color_gradient": {
+			"category": "particles",
+			"summary": "Build a Gradient/GradientTexture1D from stops and assign it as the ParticleProcessMaterial's color_ramp on a GPUParticles2D/3D node.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to a GPUParticles2D/3D node"},
+				"stops": {"type": "array", "required": true, "desc": "Non-empty list of {offset, color} dictionaries"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"apply_particle_preset": {
+			"category": "particles",
+			"summary": "Replace amount/lifetime/one_shot/explosiveness and the ParticleProcessMaterial on a GPUParticles2D/3D node with a built-in preset's values.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to a GPUParticles2D/3D node"},
+				"preset": {"type": "string", "required": true, "desc": "One of: explosion, fire, smoke, sparks, rain, snow, magic, dust"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"get_particle_info": {
+			"category": "particles",
+			"summary": "Read a GPUParticles2D/3D node's emission properties and, if present, its ParticleProcessMaterial settings (including emission shape details and color gradient stops).",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to a GPUParticles2D/3D node"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+	}
+
+
 func _get_particles_node(node_path: String) -> GPUParticles2D:
 	# Returns any GPUParticles2D or GPUParticles3D (both share similar API)
 	var node := find_node_by_path(node_path)
