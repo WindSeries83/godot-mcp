@@ -197,6 +197,16 @@ func normalize_project_path(path: String) -> String:
 	return ProjectSettings.localize_path(path).simplify_path()
 
 
+## Turns a res:// or user:// path into an absolute filesystem path suitable
+## for Image.save_png()/FileAccess; an already-absolute path is passed
+## through unchanged. Shared by every command that can write a capture to an
+## arbitrary caller-given path (screenshots, turntable sheets, ...).
+func resolve_save_path(path: String) -> String:
+	if path.begins_with("res://") or path.begins_with("user://"):
+		return ProjectSettings.globalize_path(path)
+	return path
+
+
 ## Compares two project paths for the purpose of a protective guard.
 ##
 ## Windows and macOS have case-insensitive filesystems, so "res://Player.gd"

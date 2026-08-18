@@ -10,6 +10,7 @@ func get_commands() -> Dictionary:
 		"edit_resource": _edit_resource,
 		"create_resource": _create_resource,
 		"get_resource_preview": _get_resource_preview,
+		"resource_contact_sheet": _resource_contact_sheet,
 	}
 
 
@@ -50,6 +51,16 @@ func get_command_schemas() -> Dictionary:
 			"params": {
 				"path": {"type": "string", "required": true, "desc": "res:// path to an image file or an image-producing resource"},
 				"max_size": {"type": "int", "required": false, "default": 256, "desc": "Maximum width/height of the returned thumbnail"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"resource_contact_sheet": {
+			"category": "resource",
+			"summary": "Renders the editor's own generated thumbnails (EditorResourcePreview — the same previewer that powers the FileSystem dock) for a list of resources into one grid PNG, so an agent can see candidate scenes/meshes/materials/audio/etc. instead of guessing from filenames. Unlike get_resource_preview, this works for any previewable resource type, not just images.",
+			"params": {
+				"paths": {"type": "array", "required": true, "desc": "res:// paths to preview, e.g. scenes, meshes, materials, audio streams; max 64 per call"},
+				"thumb_size": {"type": "int", "required": false, "default": 128, "desc": "Width/height in pixels of each cell, clamped 32-512"},
+				"timeout": {"type": "float", "required": false, "default": 10.0, "desc": "Seconds to wait for all previews to render before filling remaining cells blank"},
 			},
 			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
 		},
@@ -257,3 +268,91 @@ func _get_resource_preview(params: Dictionary) -> Dictionary:
 		"format": "png",
 		"path": path,
 	})
+
+
+func _resource_contact_sheet(params: Dictionary) -> Dictionary:
+	if not params.has("paths") or not params["paths"] is Array:
+		return error_invalid_params("'paths' (array of res:// paths) is required")
+	var paths: Array = params["paths"]
+	if paths.is_empty():
+		return error_invalid_params("'paths' must not be empty")
+	if paths.size() > 64:
+		return error_invalid_params("Too many paths (%d); max 64 per call" % paths.size())
+
+	var thumb_size: int = clampi(optional_int(params, "thumb_size", 128), 32, 512)
+	var timeout: float = optional_float(params, "timeout", 10.0)
+
+	var previewer := EditorInterface.get_resource_previewer()
+	# Each entry is shared, by reference, with the queued preview callback
+	# below — it fills in "image"/"error" once the engine finishes rendering
+	# that resource's thumbnail, which happens on a later frame.
+	var entries: Array[Dictionary] = []
+	for path: Variant in paths:
+		var entry := {"path": str(path)}
+		entries.append(entry)
+		if not (path is String) or not FileAccess.file_exists(path):
+			entry["error"] = "not found"
+			continue
+		previewer.queue_resource_preview(path, self, "_on_contact_sheet_preview", entry)
+
+	var elapsed := 0.0
+	while elapsed < timeout:
+		var all_done := true
+		for entry: Dictionary in entries:
+			if not entry.has("image") and not entry.has("error"):
+				all_done = false
+				break
+		if all_done:
+			break
+		await get_tree().create_timer(0.1).timeout
+		elapsed += 0.1
+
+	var cols: int = ceili(sqrt(entries.size()))
+	var rows: int = ceili(float(entries.size()) / cols)
+	var sheet := Image.create(cols * thumb_size, rows * thumb_size, false, Image.FORMAT_RGBA8)
+	sheet.fill(Color(0.15, 0.15, 0.15, 1.0))
+
+	var missing: Array = []
+	for i in entries.size():
+		var entry: Dictionary = entries[i]
+		var img: Variant = entry.get("image")
+		if img == null:
+			missing.append(entry["path"])
+			continue
+		var resized: Image = (img as Image)
+		if resized.get_width() != thumb_size or resized.get_height() != thumb_size:
+			resized.resize(thumb_size, thumb_size, Image.INTERPOLATE_LANCZOS)
+		if resized.get_format() != Image.FORMAT_RGBA8:
+			resized.convert(Image.FORMAT_RGBA8)
+		var col := i % cols
+		var row := i / cols
+		sheet.blit_rect(resized, Rect2i(0, 0, thumb_size, thumb_size), Vector2i(col * thumb_size, row * thumb_size))
+
+	var png_buffer := sheet.save_png_to_buffer()
+	var base64 := Marshalls.raw_to_base64(png_buffer)
+
+	var order: Array = []
+	for entry: Dictionary in entries:
+		order.append(entry["path"])
+
+	return success({
+		"image_base64": base64,
+		"width": sheet.get_width(),
+		"height": sheet.get_height(),
+		"columns": cols,
+		"rows": rows,
+		"thumb_size": thumb_size,
+		"order": order,
+		"missing": missing,
+	})
+
+
+## EditorResourcePreview callback signature: (path, preview, thumbnail_preview, userdata).
+## `userdata` is the same entry Dictionary queued above, so writing into it
+## here is visible to the polling loop in _resource_contact_sheet.
+func _on_contact_sheet_preview(_path: String, preview: Texture2D, _thumbnail_preview: Texture2D, userdata: Variant) -> void:
+	var entry: Dictionary = userdata
+	if preview:
+		entry["image"] = preview.get_image()
+	else:
+		entry["error"] = "no preview available for this resource type"

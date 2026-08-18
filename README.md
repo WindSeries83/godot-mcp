@@ -10,7 +10,7 @@ Pont MCP entre un assistant IA et l'éditeur Godot.
 Assistant IA <---stdio/MCP---> godot-mcp <---WebSocket:6505---> Plugin Godot
 ```
 
-**6 outils MCP** pour piloter l'éditeur : `godot_call` (175+ méthodes), `godot_list_methods`, `godot_info`, `godot_screenshot`, `godot_execute`, `godot_status`.
+**7 outils MCP** pour piloter l'éditeur : `godot_call` (toutes les méthodes de l'addon — le catalogue est découvert en direct, jamais figé dans ce dépôt), `godot_list_methods`, `godot_describe`, `godot_info`, `godot_screenshot`, `godot_execute`, `godot_status`.
 
 ## Installation
 
@@ -51,8 +51,9 @@ Ajoutez à la config de votre client IA (`.mcp.json`, `claude.json`, `opencode.j
 
 | Outil | Description |
 |-------|-------------|
-| `godot_call` | Appelle n'importe quelle méthode (175+) |
-| `godot_list_methods` | Liste les méthodes par catégorie |
+| `godot_call` | Appelle n'importe quelle méthode |
+| `godot_list_methods` | Liste les méthodes par catégorie (en direct depuis l'éditeur connecté) |
+| `godot_describe` | Schéma complet (paramètres, types, annotations) d'une ou plusieurs méthodes |
 | `godot_info` | Infos projet |
 | `godot_screenshot` | Capture éditeur en PNG |
 | `godot_execute` | Exécute du GDScript |
@@ -103,7 +104,7 @@ MCP bridge between an AI assistant and the Godot editor.
 AI Assistant <---stdio/MCP---> godot-mcp <---WebSocket:6505---> Godot Plugin
 ```
 
-**6 MCP tools** to control the editor: `godot_call` (175+ methods), `godot_list_methods`, `godot_info`, `godot_screenshot`, `godot_execute`, `godot_status`.
+**7 MCP tools** to control the editor: `godot_call` (every addon method — the catalog is discovered live, never hardcoded in this repo), `godot_list_methods`, `godot_describe`, `godot_info`, `godot_screenshot`, `godot_execute`, `godot_status`.
 
 ## Setup
 
@@ -144,8 +145,9 @@ Add to your AI client config (`.mcp.json`, `claude.json`, `opencode.json`):
 
 | Tool | Description |
 |------|-------------|
-| `godot_call` | Call any method (175+) |
-| `godot_list_methods` | List methods by category |
+| `godot_call` | Call any method |
+| `godot_list_methods` | List methods by category (live from the connected editor) |
+| `godot_describe` | Full schema (params, types, annotations) for one or more methods |
 | `godot_info` | Project info |
 | `godot_screenshot` | Editor screenshot in PNG |
 | `godot_execute` | Run GDScript |

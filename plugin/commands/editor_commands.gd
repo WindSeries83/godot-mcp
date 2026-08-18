@@ -360,7 +360,7 @@ func _get_editor_screenshot(params: Dictionary) -> Dictionary:
 
 	var save_path: String = params.get("save_path", "")
 	if save_path != "":
-		var abs_path := _resolve_save_path(save_path)
+		var abs_path := resolve_save_path(save_path)
 		var err := image.save_png(abs_path)
 		if err != OK:
 			return error_internal("Failed to save screenshot: %s" % error_string(err))
@@ -430,7 +430,7 @@ func _get_game_screenshot(params: Dictionary) -> Dictionary:
 
 	var save_path_param: String = params.get("save_path", "")
 	if save_path_param != "":
-		var abs_path := _resolve_save_path(save_path_param)
+		var abs_path := resolve_save_path(save_path_param)
 		var save_err := image.save_png(abs_path)
 		if save_err != OK:
 			return error_internal("Failed to save screenshot: %s" % error_string(save_err))
@@ -450,12 +450,6 @@ func _get_game_screenshot(params: Dictionary) -> Dictionary:
 		"height": image.get_height(),
 		"format": "png",
 	})
-
-
-func _resolve_save_path(path: String) -> String:
-	if path.begins_with("res://") or path.begins_with("user://"):
-		return ProjectSettings.globalize_path(path)
-	return path
 
 
 func _execute_editor_script(params: Dictionary) -> Dictionary:

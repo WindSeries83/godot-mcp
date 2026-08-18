@@ -13,6 +13,8 @@ func get_commands() -> Dictionary:
 		"setup_environment": _setup_environment,
 		"setup_camera_3d": _setup_camera_3d,
 		"add_gridmap": _add_gridmap,
+		"get_spatial_bounds": _get_spatial_bounds,
+		"turntable_screenshot": _turntable_screenshot,
 	}
 
 
@@ -144,6 +146,28 @@ func get_command_schemas() -> Dictionary:
 				"cells": {"type": "array", "required": false, "default": [], "desc": "List of {x, y, z, item, orientation} cell placements"},
 			},
 			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"get_spatial_bounds": {
+			"category": "3d",
+			"summary": "World-space AABB of a Node3D, merged with its VisualInstance3D descendants' bounds. The primitive an agent needs before placing/sizing/framing anything in 3D — without it, positions and scales are guesses.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to a Node3D"},
+				"include_children": {"type": "bool", "required": false, "default": true, "desc": "Merge descendant VisualInstance3D bounds in, not just the node's own"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"turntable_screenshot": {
+			"category": "3d",
+			"summary": "Orbits the 3D editor camera around a node's world-space bounds, capturing one view per angle, and composites them into a single contact-sheet PNG. Restores the original camera position/FOV afterward. Does not work under --headless (same limitation as get_editor_screenshot).",
+			"params": {
+				"node_path": {"type": "string", "required": false, "default": ".", "desc": "Scene-relative path to the Node3D to frame"},
+				"views": {"type": "int", "required": false, "default": 4, "desc": "Number of evenly-spaced angles around the node, clamped 1-12"},
+				"elevation_degrees": {"type": "float", "required": false, "default": 25.0, "desc": "Camera elevation above the horizontal plane"},
+				"padding": {"type": "float", "required": false, "default": 1.4, "desc": "Framing margin multiplier around the bounds, clamped 1.0-5.0"},
+				"thumb_size": {"type": "int", "required": false, "default": 384, "desc": "Width/height in pixels of each view before tiling, clamped 64-1024"},
+				"save_path": {"type": "string", "required": false, "default": "", "desc": "If given, save the composed sheet here (res://, user://, or absolute) instead of returning base64"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
 		},
 	}
 
@@ -810,3 +834,174 @@ func _add_gridmap(params: Dictionary) -> Dictionary:
 		"is_existing": is_existing,
 		"has_mesh_library": gridmap.mesh_library != null,
 	})
+
+
+## ─── 7. get_spatial_bounds ──────────────────────────────────────────────────
+
+func _get_spatial_bounds(params: Dictionary) -> Dictionary:
+	var result := require_string(params, "node_path")
+	if result[1] != null:
+		return result[1]
+	var node_path: String = result[0]
+
+	var root := get_edited_root()
+	if root == null:
+		return error_no_scene()
+
+	var node := find_node_by_path(node_path)
+	if node == null:
+		return error_not_found("Node '%s'" % node_path)
+	if not node is Node3D:
+		return error_invalid_params("Node '%s' is a %s, not a Node3D" % [node_path, node.get_class()])
+
+	var include_children: bool = optional_bool(params, "include_children", true)
+	var aabb: Variant = _world_aabb_of(node, include_children)
+	if aabb == null:
+		return error(-32000, "No visual geometry found under '%s'" % node_path, {
+			"suggestion": "The node (or its children, if include_children) must contain a VisualInstance3D such as MeshInstance3D",
+		})
+
+	var b: AABB = aabb
+	var center := b.get_center()
+	return success({
+		"node_path": node_path,
+		"position": {"x": b.position.x, "y": b.position.y, "z": b.position.z},
+		"size": {"x": b.size.x, "y": b.size.y, "z": b.size.z},
+		"center": {"x": center.x, "y": center.y, "z": center.z},
+		"radius": b.size.length() / 2.0,
+	})
+
+
+## World-space AABB of `node` (if it's a VisualInstance3D) merged with its
+## descendants' (if include_children). Returns null — not an empty AABB at
+## the origin — when nothing visual was found, so callers can tell "no
+## geometry" apart from "geometry that happens to be zero-sized".
+func _world_aabb_of(node: Node, include_children: bool) -> Variant:
+	var combined: AABB
+	var has_any := false
+
+	if node is VisualInstance3D:
+		var local_aabb: AABB = (node as VisualInstance3D).get_aabb()
+		combined = (node as Node3D).global_transform * local_aabb
+		has_any = true
+
+	if include_children:
+		for child in node.get_children():
+			if child is Node3D:
+				var child_aabb: Variant = _world_aabb_of(child, true)
+				if child_aabb != null:
+					combined = combined.merge(child_aabb) if has_any else child_aabb
+					has_any = true
+
+	return combined if has_any else null
+
+
+## ─── 8. turntable_screenshot ────────────────────────────────────────────────
+
+func _turntable_screenshot(params: Dictionary) -> Dictionary:
+	var node_path: String = optional_string(params, "node_path", ".")
+
+	var root := get_edited_root()
+	if root == null:
+		return error_no_scene()
+
+	var node := find_node_by_path(node_path)
+	if node == null:
+		return error_not_found("Node '%s'" % node_path)
+	if not node is Node3D:
+		return error_invalid_params("Node '%s' is a %s, not a Node3D" % [node_path, node.get_class()])
+
+	var views: int = clampi(optional_int(params, "views", 4), 1, 12)
+	var elevation_degrees: float = optional_float(params, "elevation_degrees", 25.0)
+	var padding: float = clampf(optional_float(params, "padding", 1.4), 1.0, 5.0)
+	var thumb_size: int = clampi(optional_int(params, "thumb_size", 384), 64, 1024)
+
+	var aabb: Variant = _world_aabb_of(node, true)
+	if aabb == null:
+		return error(-32000, "No visual geometry found under '%s'" % node_path, {
+			"suggestion": "The node (or a child) must contain a VisualInstance3D such as MeshInstance3D",
+		})
+	var b: AABB = aabb
+	var center := b.get_center()
+	# A single point has zero radius, which would divide framing distance by
+	# zero below; floor it to something small instead of failing the call.
+	var radius: float = maxf(b.size.length() / 2.0, 0.05)
+
+	var vp3d := EditorInterface.get_editor_viewport_3d()
+	var cam := vp3d.get_camera_3d() if vp3d else null
+	if not cam:
+		return error(-32000, "No 3D editor camera found", {"suggestion": "Open a 3D scene in the editor"})
+
+	var orig_transform := cam.global_transform
+	var orig_fov := cam.fov
+	var fov := 50.0
+	var distance: float = radius * padding / sin(deg_to_rad(fov * 0.5))
+	cam.fov = fov
+
+	var thumbs: Array[Image] = []
+	var angles_used: Array = []
+	var elevation_rad := deg_to_rad(elevation_degrees)
+
+	for i in views:
+		var azimuth := (TAU / views) * i
+		var dir := Vector3(
+			cos(elevation_rad) * sin(azimuth),
+			sin(elevation_rad),
+			cos(elevation_rad) * cos(azimuth)
+		)
+		cam.global_position = center + dir * distance
+		cam.look_at(center, Vector3.UP)
+
+		# The camera move only takes effect in a subsequently rendered frame;
+		# without this, every capture in the loop would return the same stale
+		# image (the one that was on screen when the call started).
+		await RenderingServer.frame_post_draw
+
+		var base_control: Control = get_editor().get_base_control()
+		var viewport: Viewport = base_control.get_viewport() if base_control else null
+		var texture: ViewportTexture = viewport.get_texture() if viewport else null
+		var image: Image = texture.get_image() if texture else null
+		if image == null:
+			cam.global_transform = orig_transform
+			cam.fov = orig_fov
+			return error_internal("Could not capture a frame for view %d of %d" % [i + 1, views])
+
+		image.resize(thumb_size, thumb_size, Image.INTERPOLATE_LANCZOS)
+		if image.get_format() != Image.FORMAT_RGBA8:
+			image.convert(Image.FORMAT_RGBA8)
+		thumbs.append(image)
+		angles_used.append(snappedf(rad_to_deg(azimuth), 0.1))
+
+	cam.global_transform = orig_transform
+	cam.fov = orig_fov
+
+	var cols: int = ceili(sqrt(thumbs.size()))
+	var rows: int = ceili(float(thumbs.size()) / cols)
+	var sheet := Image.create(cols * thumb_size, rows * thumb_size, false, Image.FORMAT_RGBA8)
+	for i in thumbs.size():
+		var col := i % cols
+		var row := i / cols
+		sheet.blit_rect(thumbs[i], Rect2i(0, 0, thumb_size, thumb_size), Vector2i(col * thumb_size, row * thumb_size))
+
+	var response := {
+		"width": sheet.get_width(),
+		"height": sheet.get_height(),
+		"columns": cols,
+		"rows": rows,
+		"views": views,
+		"angles_degrees": angles_used,
+		"format": "png",
+	}
+
+	var save_path: String = optional_string(params, "save_path", "")
+	if not save_path.is_empty():
+		var abs_path := resolve_save_path(save_path)
+		var err := sheet.save_png(abs_path)
+		if err != OK:
+			return error_internal("Failed to save turntable sheet: %s" % error_string(err))
+		response["saved_path"] = save_path
+		return success(response)
+
+	var png_buffer := sheet.save_png_to_buffer()
+	response["image_base64"] = Marshalls.raw_to_base64(png_buffer)
+	return success(response)
