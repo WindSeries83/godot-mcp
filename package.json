@@ -4,6 +4,9 @@
   "description": "MCP bridge for Godot editor — call any addon method via WebSocket JSON-RPC",
   "type": "module",
   "main": "dist/index.js",
+  "engines": {
+    "node": ">=18"
+  },
   "bin": {
     "godot-mcp": "dist/index.js"
   },

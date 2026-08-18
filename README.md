@@ -58,6 +58,14 @@ Ajoutez à la config de votre client IA (`.mcp.json`, `claude.json`, `opencode.j
 | `godot_screenshot` | Capture éditeur en PNG |
 | `godot_execute` | Exécute du GDScript |
 | `godot_status` | Vérifie la connexion |
+| `godot_assets` | Recherche/prévisualise/importe des assets CC0 (Poly Haven, ambientCG) |
+
+> **`godot_assets`** effectue des requêtes réseau sortantes vers `polyhaven.com`
+> et `ambientcg.com`. `import` écrit les fichiers dans
+> `<projet>/assets/<provider>/<id>/` (chemin obtenu via `get_project_info`)
+> puis déclenche un rescan du projet. Sources CC0 uniquement (domaine
+> public, aucune attribution légalement requise) ; une note `NOTICE.txt`
+> est écrite à côté de chaque asset importé.
 
 > **Chemins de nodes** : les paramètres `parent_path` et `node_path` de
 > `godot_call` (ex. `add_node`, `update_property`, `delete_node`) sont
@@ -75,6 +83,7 @@ Ajoutez à la config de votre client IA (`.mcp.json`, `claude.json`, `opencode.j
 godot-mcp/
 ├── plugin/              ← Plugin Godot (à copier dans votre projet)
 ├── src/index.ts         ← Serveur MCP (Node.js)
+├── src/assets/          ← Sourcing d'assets CC0 (Poly Haven, ambientCG)
 ├── package.json
 ├── tsconfig.json
 ├── README.md
@@ -152,6 +161,14 @@ Add to your AI client config (`.mcp.json`, `claude.json`, `opencode.json`):
 | `godot_screenshot` | Editor screenshot in PNG |
 | `godot_execute` | Run GDScript |
 | `godot_status` | Check connection |
+| `godot_assets` | Search/preview/import CC0 assets (Poly Haven, ambientCG) |
+
+> **`godot_assets`** makes outbound network requests to `polyhaven.com` and
+> `ambientcg.com`. `import` writes files under
+> `<project>/assets/<provider>/<id>/` (path learned via `get_project_info`)
+> and then triggers a project rescan. CC0 sources only (public domain, no
+> attribution legally required); a `NOTICE.txt` is written next to each
+> imported asset regardless.
 
 > **Node paths**: `parent_path` and `node_path` parameters of `godot_call`
 > (e.g. `add_node`, `update_property`, `delete_node`) are **always relative to
@@ -175,6 +192,7 @@ npm run test:godot # headless GDScript tests (needs `godot`/`godot4` on PATH or 
 godot-mcp/
 ├── plugin/              ← Godot plugin (copy to your project)
 ├── src/index.ts         ← MCP server (Node.js)
+├── src/assets/          ← CC0 asset sourcing (Poly Haven, ambientCG)
 ├── test/                ← vitest suite + headless GDScript fixture project
 ├── package.json
 ├── tsconfig.json

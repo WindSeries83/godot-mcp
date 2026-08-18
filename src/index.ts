@@ -10,6 +10,7 @@ import crypto from "node:crypto";
 import { Duplex } from "node:stream";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { searchAssets, getAssetThumbnail, importAsset, type AssetProvider } from "./assets/index.js";
 
 const WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const BASE_PORT = parseInt(process.env.GODOT_MCP_PORT ?? "6505", 10);
@@ -418,6 +419,28 @@ const TOOL_DEFS = [
     inputSchema: { type: "object", properties: {} },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
+  {
+    name: "godot_assets",
+    description:
+      "Search, preview, and import free CC0 3D assets (Poly Haven, ambientCG) straight into the Godot project. " +
+      "'search' finds candidates by name/tag; 'preview' returns a thumbnail so you can pick by sight instead of " +
+      "guessing from an id; 'import' downloads into res://assets/<provider>/<id>/ and rescans the project filesystem.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["search", "preview", "import"] },
+        query: { type: "string", description: "search: text matched against name/tags/categories" },
+        provider: { type: "string", enum: ["polyhaven", "ambientcg"], description: "Restrict to one provider; omit to use both (search) or when unambiguous" },
+        type: { type: "string", description: "search: provider-specific category filter — 'hdris'/'textures'/'models' for Poly Haven, 'Material'/'HDRI'/'Decal'/etc. for ambientCG" },
+        limit: { type: "number", description: "search: max results, default 20" },
+        id: { type: "string", description: "preview/import: an asset id from a prior search result" },
+        resolution: { type: "string", description: "import: resolution to fetch, e.g. '1k'/'2k' (Poly Haven) or '1K'/'2K' (ambientCG); a small default is used if omitted" },
+        format: { type: "string", description: "import, Poly Haven only: file format to fetch, e.g. 'jpg'/'exr'/'gltf'; a sensible default is used if omitted" },
+      },
+      required: ["action"],
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  },
 ];
 
 // Grouped counts only — the full per-method listing is fetched live from the
@@ -520,6 +543,54 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
       case "godot_status": {
         return { content: [{ type: "text", text: godot.status }] };
+      }
+      case "godot_assets": {
+        const action = args?.action as string;
+        switch (action) {
+          case "search": {
+            const query = (args?.query as string) ?? "";
+            const provider = args?.provider as AssetProvider | undefined;
+            const type = args?.type as string | undefined;
+            const limit = args?.limit as number | undefined;
+            const results = await searchAssets(query, { provider, type, limit });
+            return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
+          }
+          case "preview": {
+            const provider = args?.provider as AssetProvider;
+            const id = args?.id as string;
+            if (!provider || !id) throw new Error("godot_assets preview requires 'provider' and 'id'");
+            const buf = await getAssetThumbnail(provider, id);
+            return { content: [
+              { type: "text", text: `${provider}/${id} thumbnail` },
+              { type: "image", data: buf.toString("base64"), mimeType: "image/png" },
+            ]};
+          }
+          case "import": {
+            const provider = args?.provider as AssetProvider;
+            const id = args?.id as string;
+            if (!provider || !id) throw new Error("godot_assets import requires 'provider' and 'id'");
+            const info = await godot.call("get_project_info") as { project_path?: string };
+            if (!info?.project_path) {
+              throw new Error("Could not determine the Godot project path (get_project_info returned none) — is the editor connected?");
+            }
+            const resolution = args?.resolution as string | undefined;
+            const format = args?.format as string | undefined;
+            const result = await importAsset(provider, id, info.project_path, { resolution, format });
+            // Best-effort: the import already succeeded and wrote real files
+            // on disk regardless of whether the rescan itself goes through.
+            await godot.call("reload_project").catch(() => {});
+            return { content: [{ type: "text", text: JSON.stringify({
+              provider,
+              id,
+              files_written: result.files.length,
+              total_bytes: result.files.reduce((sum, f) => sum + f.bytes, 0),
+              dest_dir: result.destDir,
+              notice: result.noticePath,
+            }, null, 2) }] };
+          }
+          default:
+            throw new Error(`Unknown action '${action}' for godot_assets — use search, preview, or import`);
+        }
       }
       default:
         throw new Error(`Unknown tool: ${name}`);
