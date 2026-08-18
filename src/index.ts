@@ -4,6 +4,11 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
+  ListResourcesRequestSchema,
+  ListResourceTemplatesRequestSchema,
+  ReadResourceRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import http from "node:http";
 import crypto from "node:crypto";
@@ -344,9 +349,9 @@ export class GodotBridge {
 
 const godot = new GodotBridge();
 
-const server = new Server(
+export const server = new Server(
   { name: "godot-mcp", version: "0.1.0" },
-  { capabilities: { tools: {} } },
+  { capabilities: { tools: {}, resources: {}, prompts: {} } },
 );
 
 const TOOL_DEFS = [
@@ -462,6 +467,192 @@ function summarizeCategories(all: Record<string, MethodSummary>): string {
     `Call godot_list_methods again with one of these categories to list its methods.\n\n${lines.join(", ")}`;
 }
 
+// --- MCP resources ---------------------------------------------------------
+// Unlike tools, resources cost nothing in the tool-listing window — the model
+// only pays for one it actually reads. These mirror the addon's own
+// read-only methods so an agent can pull project/scene state as ambient
+// context instead of spending a tool call on it.
+
+interface ResourceDef {
+  uri: string;
+  name: string;
+  description: string;
+  mimeType: string;
+  fetch: () => Promise<unknown>;
+}
+
+export const RESOURCE_DEFS: ResourceDef[] = [
+  {
+    uri: "godot://scene/current",
+    name: "Current scene tree",
+    description: "The node tree of the scene currently open in the editor (see get_scene_tree).",
+    mimeType: "application/json",
+    fetch: () => godot.call("get_scene_tree"),
+  },
+  {
+    uri: "godot://project/info",
+    name: "Project info",
+    description: "Project name, Godot version, path, main scene, viewport/window size, renderer, autoloads.",
+    mimeType: "application/json",
+    fetch: () => godot.call("get_project_info"),
+  },
+  {
+    uri: "godot://project/settings",
+    name: "Project settings",
+    description: "All ProjectSettings key/value pairs (see get_project_settings).",
+    mimeType: "application/json",
+    fetch: () => godot.call("get_project_settings"),
+  },
+  {
+    uri: "godot://logs/recent",
+    name: "Recent editor output",
+    description: "The last lines of the editor's Output panel (see get_output_log).",
+    mimeType: "text/plain",
+    fetch: async () => {
+      const result = await godot.call("get_output_log", { max_lines: 200 }) as Record<string, unknown>;
+      return result?.log ?? result?.lines ?? result;
+    },
+  },
+];
+
+// ClassDB reflection never changes mid-session (the engine's own classes are
+// fixed once Godot starts), so this is the one resource worth caching —
+// everything else above reflects live, frequently-changing editor state.
+const CLASS_RESOURCE_TTL_MS = 5 * 60_000;
+const classResourceCache = new Map<string, { value: unknown; at: number }>();
+
+async function readClassResource(className: string): Promise<unknown> {
+  const cached = classResourceCache.get(className);
+  if (cached && Date.now() - cached.at < CLASS_RESOURCE_TTL_MS) return cached.value;
+  const value = await godot.call("classdb_describe", { class_name: className });
+  classResourceCache.set(className, { value, at: Date.now() });
+  return value;
+}
+
+server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+  resources: RESOURCE_DEFS.map(({ uri, name, description, mimeType }) => ({ uri, name, description, mimeType })),
+}));
+
+server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
+  resourceTemplates: [
+    {
+      uriTemplate: "godot://class/{name}",
+      name: "ClassDB class reflection",
+      description: "Properties, methods, signals, enums, and inheritance for a Godot engine class, e.g. godot://class/RigidBody3D.",
+      mimeType: "application/json",
+    },
+  ],
+}));
+
+server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
+  const { uri } = req.params;
+  const classMatch = /^godot:\/\/class\/(.+)$/.exec(uri);
+  if (classMatch) {
+    const value = await readClassResource(decodeURIComponent(classMatch[1]));
+    return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify(value, null, 2) }] };
+  }
+  const def = RESOURCE_DEFS.find((r) => r.uri === uri);
+  if (!def) throw new Error(`Unknown resource: ${uri}`);
+  const value = await def.fetch();
+  const text = def.mimeType === "text/plain" && typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  return { contents: [{ uri, mimeType: def.mimeType, text }] };
+});
+
+// --- MCP prompts -------------------------------------------------------
+// Reusable task templates for the workflows this server was actually built
+// to support — surfaced so a client can offer them as slash-command-like
+// shortcuts instead of the user having to describe the whole workflow.
+
+interface PromptDef {
+  name: string;
+  description: string;
+  arguments: { name: string; description: string; required: boolean }[];
+  render: (args: Record<string, string>) => string;
+}
+
+export const PROMPT_DEFS: PromptDef[] = [
+  {
+    name: "blockout-3d-level",
+    description: "Block out a 3D level with CSG primitives, checking the result visually as you go.",
+    arguments: [
+      { name: "brief", description: "What to build, e.g. 'a small courtyard with two raised platforms'", required: true },
+    ],
+    render: (args) =>
+      `Block out this 3D level: ${args.brief}\n\n` +
+      `Work iteratively and check your work visually — don't place more than a couple of pieces blind:\n` +
+      `1. Use get_spatial_bounds on the scene root to see what's already there.\n` +
+      `2. Add grey-box geometry with add_csg_shape (box/cylinder/sphere/combiner with boolean operations).\n` +
+      `3. Use align_nodes / distribute_nodes / snap_to_ground to place pieces without overlap or floating gaps.\n` +
+      `4. After a few pieces, call turntable_screenshot on the new geometry to see it from multiple angles — ` +
+      `look for interpenetration, floating objects, or wrong scale before continuing.\n` +
+      `5. Repeat until the brief is met, then take a final turntable_screenshot of the whole scene.`,
+  },
+  {
+    name: "diagnose-crash",
+    description: "Investigate an editor error or crash using the output log and project state.",
+    arguments: [
+      { name: "symptom", description: "What went wrong, e.g. 'editor freezes when I open Level3.tscn'", required: true },
+    ],
+    render: (args) =>
+      `Diagnose this problem: ${args.symptom}\n\n` +
+      `1. Read godot://logs/recent (or godot_call get_output_log with a larger max_lines) for the actual error/stack.\n` +
+      `2. If the error names a class or method you don't recognize, look it up with godot://class/{name} ` +
+      `or godot_call classdb_describe rather than guessing.\n` +
+      `3. Use search_in_files to find where the offending code or node path is referenced.\n` +
+      `4. Cross-check against get_scene_tree / get_node_properties for the scene involved.\n` +
+      `Report the root cause before proposing a fix.`,
+  },
+  {
+    name: "audit-scene-perf",
+    description: "Audit a scene for common performance issues (draw calls, LOD, unbounded lights, missing culling).",
+    arguments: [
+      { name: "scene_path", description: "Scene to audit; omit for the currently edited scene", required: false },
+    ],
+    render: (args) =>
+      `Audit ${args.scene_path ? `the scene at ${args.scene_path}` : "the currently edited scene"} for performance issues.\n\n` +
+      `1. Walk get_scene_tree and count nodes per type — flag large numbers of individual MeshInstance3D nodes ` +
+      `that could be collapsed into a single MultiMeshInstance3D.\n` +
+      `2. For 3D scenes, check get_spatial_bounds on major subtrees and look for objects without visibility_range ` +
+      `set despite being far from the camera's typical path.\n` +
+      `3. Flag lights and ReflectionProbes with unbounded or very large ranges.\n` +
+      `4. Check classdb_describe on any custom/unusual node types found, to understand what they cost.\n` +
+      `Summarize findings as a prioritized list, most expensive first — don't apply fixes without confirming.`,
+  },
+  {
+    name: "asset-strategy",
+    description: "Decide whether to source a free CC0 asset or generate primitives/procedural geometry for a given need.",
+    arguments: [
+      { name: "need", description: "What's needed, e.g. 'a rusty barrel prop' or 'a rock texture for the courtyard floor'", required: true },
+    ],
+    render: (args) =>
+      `Decide how to get this: ${args.need}\n\n` +
+      `Prefer a real CC0 asset over hand-built geometry whenever one exists and fits — it will look better ` +
+      `and cost less effort than modeling from primitives:\n` +
+      `1. Search first: godot_assets {action: "search", query: "..."} across Poly Haven (models/HDRIs/textures) ` +
+      `and ambientCG (PBR materials).\n` +
+      `2. Preview 2-3 candidates (godot_assets {action: "preview", ...}) before picking — don't import blind.\n` +
+      `3. Only fall back to CSG primitives / procedural placement (add_csg_shape, add_multimesh_scatter) when ` +
+      `nothing suitable turns up, or the need is genuinely abstract (blockout geometry, gameplay volumes).\n` +
+      `4. On import, note the dest_dir and NOTICE.txt path in your response so the source is traceable.`,
+  },
+];
+
+server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+  prompts: PROMPT_DEFS.map(({ name, description, arguments: args }) => ({ name, description, arguments: args })),
+}));
+
+server.setRequestHandler(GetPromptRequestSchema, async (req) => {
+  const def = PROMPT_DEFS.find((p) => p.name === req.params.name);
+  if (!def) throw new Error(`Unknown prompt: ${req.params.name}`);
+  const args = (req.params.arguments ?? {}) as Record<string, string>;
+  const missing = def.arguments.filter((a) => a.required && !args[a.name]);
+  if (missing.length) throw new Error(`Missing required argument(s): ${missing.map((a) => a.name).join(", ")}`);
+  return {
+    description: def.description,
+    messages: [{ role: "user", content: { type: "text", text: def.render(args) } }],
+  };
+});
+
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOL_DEFS }));
 
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
@@ -574,16 +765,28 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
             const provider = args?.provider as AssetProvider;
             const id = args?.id as string;
             if (!provider || !id) throw new Error("godot_assets import requires 'provider' and 'id'");
+            // Downloads can take a while on a slow connection; report progress
+            // if the client asked for it (request _meta.progressToken), and
+            // silently skip otherwise — this is optional per the MCP spec.
+            const progressToken = (req.params as { _meta?: { progressToken?: string | number } })._meta?.progressToken;
+            const reportProgress = (progress: number, total: number, message: string) =>
+              progressToken != null
+                ? server.notification({ method: "notifications/progress", params: { progressToken, progress, total, message } }).catch(() => {})
+                : Promise.resolve();
+            await reportProgress(0, 3, `Locating ${provider}/${id}`);
             const info = await godot.call("get_project_info") as { project_path?: string };
             if (!info?.project_path) {
               throw new Error("Could not determine the Godot project path (get_project_info returned none) — is the editor connected?");
             }
             const resolution = args?.resolution as string | undefined;
             const format = args?.format as string | undefined;
+            await reportProgress(1, 3, `Downloading ${provider}/${id}`);
             const result = await importAsset(provider, id, info.project_path, { resolution, format });
+            await reportProgress(2, 3, "Rescanning project filesystem");
             // Best-effort: the import already succeeded and wrote real files
             // on disk regardless of whether the rescan itself goes through.
             await godot.call("reload_project").catch(() => {});
+            await reportProgress(3, 3, "Done");
             return { content: [{ type: "text", text: JSON.stringify({
               provider,
               id,

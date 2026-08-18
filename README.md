@@ -86,6 +86,23 @@ Ajoutez à la config de votre client IA (`.mcp.json`, `claude.json`, `opencode.j
 > fonctionne pas en mode `--headless` (erreur "Could not get image from
 > viewport").
 
+## Ressources et prompts MCP
+
+En plus des outils, le serveur expose l'état du projet en **ressources**
+(gratuites en tokens tant qu'elles ne sont pas lues, contrairement aux
+outils) : `godot://scene/current`, `godot://project/info`,
+`godot://project/settings`, `godot://logs/recent`, et le template
+`godot://class/{name}` (réflexion ClassDB, mise en cache 5 min — les classes
+du moteur ne changent pas en cours de session).
+
+Quatre **prompts** réutilisables guident les workflows pour lesquels ce
+serveur a été conçu : `blockout-3d-level`, `diagnose-crash`,
+`audit-scene-perf`, `asset-strategy`.
+
+`godot_assets {action: "import"}` envoie des notifications de progression
+(`notifications/progress`) si le client fournit un `progressToken` — le
+téléchargement peut prendre du temps sur une connexion lente.
+
 ## Arborescence
 
 ```
@@ -195,6 +212,21 @@ Add to your AI client config (`.mcp.json`, `claude.json`, `opencode.json`):
 >
 > **`godot_screenshot`** requires an editor with active rendering: it does not
 > work in `--headless` mode ("Could not get image from viewport" error).
+
+## MCP resources and prompts
+
+Besides tools, the server exposes project state as **resources** (free in
+tokens until actually read, unlike tools): `godot://scene/current`,
+`godot://project/info`, `godot://project/settings`, `godot://logs/recent`,
+and the template `godot://class/{name}` (ClassDB reflection, cached for 5
+minutes — engine classes don't change mid-session).
+
+Four reusable **prompts** guide the workflows this server was built for:
+`blockout-3d-level`, `diagnose-crash`, `audit-scene-perf`, `asset-strategy`.
+
+`godot_assets {action: "import"}` sends `notifications/progress` updates if
+the client supplies a `progressToken` — the download can take a while on a
+slow connection.
 
 ## Development
 
