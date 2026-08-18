@@ -73,6 +73,15 @@ Ajoutez à la config de votre client IA (`.mcp.json`, `claude.json`, `opencode.j
 > racine de la scène). Les chemins absolus Godot (`"/root"`, `"../..."`) sont
 > rejetés — ils cibleraient l'arbre interne de l'éditeur au lieu de la scène.
 >
+> **Handles de session** : tout paramètre `node_path` accepte aussi un
+> handle (chaîne `"@id:<n>"`, renvoyée sous `"handle"` par `get_scene_tree`,
+> `add_node`, `rename_node`, etc.) à la place d'un chemin. Un handle continue
+> de désigner le même node après un renommage ou un déplacement dans la
+> scène, contrairement à un chemin qui casse dès que l'un des deux se
+> produit — utile pour enchaîner plusieurs appels sur le node qu'on vient de
+> créer/modifier. Un handle expire si la scène est rechargée/refermée ;
+> rappelez `get_scene_tree` pour en obtenir un nouveau.
+>
 > **`godot_screenshot`** nécessite un éditeur avec rendu actif : il ne
 > fonctionne pas en mode `--headless` (erreur "Could not get image from
 > viewport").
@@ -175,6 +184,14 @@ Add to your AI client config (`.mcp.json`, `claude.json`, `opencode.json`):
 > the root of the currently edited scene** (`"."` = scene root). Absolute
 > Godot paths (`"/root"`, `"../..."`) are rejected — they would target the
 > editor's internal tree instead of the scene.
+>
+> **Session handles**: any `node_path` parameter also accepts a handle (an
+> `"@id:<n>"` string, returned as `"handle"` by `get_scene_tree`, `add_node`,
+> `rename_node`, etc.) instead of a path. A handle keeps addressing the same
+> node across a rename or reparent, where a path would break — useful for
+> chaining several calls against the node you just created/modified. A
+> handle goes stale when the scene is reloaded/reopened; call
+> `get_scene_tree` again for a fresh one.
 >
 > **`godot_screenshot`** requires an editor with active rendering: it does not
 > work in `--headless` mode ("Could not get image from viewport" error).

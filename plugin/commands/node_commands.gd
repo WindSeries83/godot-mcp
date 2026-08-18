@@ -216,7 +216,7 @@ func _add_node(params: Dictionary) -> Dictionary:
 
 	var parent := find_node_by_path(parent_path)
 	if parent == null:
-		return error_not_found("Parent node '%s'" % parent_path, "Use get_scene_tree to see available nodes")
+		return error_node_not_found(parent_path)
 
 	var node: Node
 	var custom_script: Script = null
@@ -269,6 +269,7 @@ func _add_node(params: Dictionary) -> Dictionary:
 
 	return success({
 		"node_path": str(root.get_path_to(node)),
+		"handle": node_handle(node),
 		"type": type,
 		"name": str(node.name),
 	})
@@ -286,7 +287,7 @@ func _delete_node(params: Dictionary) -> Dictionary:
 
 	var node := find_node_by_path(node_path)
 	if node == null:
-		return error_not_found("Node '%s'" % node_path, "Use get_scene_tree to see available nodes")
+		return error_node_not_found(node_path)
 
 	if node == root:
 		return error_invalid_params("Cannot delete the root node")
@@ -319,7 +320,7 @@ func _duplicate_node(params: Dictionary) -> Dictionary:
 
 	var node := find_node_by_path(node_path)
 	if node == null:
-		return error_not_found("Node '%s'" % node_path, "Use get_scene_tree to see available nodes")
+		return error_node_not_found(node_path)
 
 	if new_name.is_empty():
 		new_name = str(node.name) + "_copy"
@@ -354,6 +355,7 @@ func _duplicate_node(params: Dictionary) -> Dictionary:
 	return success({
 		"original": str(root.get_path_to(node)),
 		"duplicate": str(root.get_path_to(dup)),
+		"handle": node_handle(dup),
 		"name": str(dup.name),
 	})
 
@@ -375,14 +377,14 @@ func _move_node(params: Dictionary) -> Dictionary:
 
 	var node := find_node_by_path(node_path)
 	if node == null:
-		return error_not_found("Node '%s'" % node_path, "Use get_scene_tree to see available nodes")
+		return error_node_not_found(node_path)
 
 	if node == root:
 		return error_invalid_params("Cannot move the root node")
 
 	var new_parent := find_node_by_path(new_parent_path)
 	if new_parent == null:
-		return error_not_found("Target parent '%s'" % new_parent_path, "Use get_scene_tree to see available nodes")
+		return error_node_not_found(new_parent_path)
 
 	# Check we're not moving a node into its own subtree
 	if new_parent == node or node.is_ancestor_of(new_parent):
@@ -404,6 +406,7 @@ func _move_node(params: Dictionary) -> Dictionary:
 
 	return success({
 		"node": str(node.name),
+		"handle": node_handle(node),
 		"old_parent": str(root.get_path_to(old_parent)),
 		"new_parent": str(root.get_path_to(new_parent)),
 		"new_path": str(root.get_path_to(node)),
@@ -431,7 +434,7 @@ func _update_property(params: Dictionary) -> Dictionary:
 
 	var node := find_node_by_path(node_path)
 	if node == null:
-		return error_not_found("Node '%s'" % node_path, "Use get_scene_tree to see available nodes")
+		return error_node_not_found(node_path)
 
 	# Check property exists
 	if not property in node:
@@ -503,7 +506,7 @@ func _get_node_properties(params: Dictionary) -> Dictionary:
 
 	var node := find_node_by_path(node_path)
 	if node == null:
-		return error_not_found("Node '%s'" % node_path, "Use get_scene_tree to see available nodes")
+		return error_node_not_found(node_path)
 
 	var category: String = optional_string(params, "category", "")
 	var props := NodeUtils.get_node_properties_dict(node)
@@ -518,6 +521,7 @@ func _get_node_properties(params: Dictionary) -> Dictionary:
 
 	return success({
 		"node_path": str(root.get_path_to(node)),
+		"handle": node_handle(node),
 		"type": node.get_class(),
 		"properties": props,
 	})
@@ -565,7 +569,7 @@ func _select_nodes(params: Dictionary) -> Dictionary:
 			return error_invalid_params("node_paths cannot contain empty values")
 		var node := find_node_by_path(node_path)
 		if node == null:
-			return error_not_found("Node '%s'" % node_path, "Use get_scene_tree to see available nodes")
+			return error_node_not_found(node_path)
 		resolved_nodes.append(node)
 
 	var selection := EditorInterface.get_selection()
@@ -635,6 +639,7 @@ func _serialize_selection_nodes(root: Node, nodes: Array) -> Array:
 			"name": node.name,
 			"path": str(root.get_path_to(node)) if node != root else ".",
 			"type": node.get_class(),
+			"handle": node_handle(node),
 		})
 	return serialized
 
@@ -661,7 +666,7 @@ func _add_resource(params: Dictionary) -> Dictionary:
 
 	var node := find_node_by_path(node_path)
 	if node == null:
-		return error_not_found("Node '%s'" % node_path, "Use get_scene_tree to see available nodes")
+		return error_node_not_found(node_path)
 
 	if not ClassDB.class_exists(resource_type):
 		return error_invalid_params("Unknown resource type: %s" % resource_type)
@@ -712,7 +717,7 @@ func _set_anchor_preset(params: Dictionary) -> Dictionary:
 
 	var node := find_node_by_path(node_path)
 	if node == null:
-		return error_not_found("Node '%s'" % node_path, "Use get_scene_tree to see available nodes")
+		return error_node_not_found(node_path)
 
 	if not node is Control:
 		return error_invalid_params("Node '%s' is not a Control (is %s)" % [node_path, node.get_class()])
@@ -794,7 +799,7 @@ func _rename_node(params: Dictionary) -> Dictionary:
 
 	var node := find_node_by_path(node_path)
 	if node == null:
-		return error_not_found("Node '%s'" % node_path, "Use get_scene_tree to see available nodes")
+		return error_node_not_found(node_path)
 
 	var old_name: String = node.name
 	var undo_redo := get_undo_redo()
@@ -803,7 +808,12 @@ func _rename_node(params: Dictionary) -> Dictionary:
 	undo_redo.add_undo_property(node, "name", old_name)
 	undo_redo.commit_action()
 
-	return success({"old_name": old_name, "new_name": str(node.name), "node_path": str(root.get_path_to(node))})
+	return success({
+		"old_name": old_name,
+		"new_name": str(node.name),
+		"node_path": str(root.get_path_to(node)),
+		"handle": node_handle(node),
+	})
 
 
 func _connect_signal(params: Dictionary) -> Dictionary:
@@ -833,11 +843,11 @@ func _connect_signal(params: Dictionary) -> Dictionary:
 
 	var source := find_node_by_path(source_path)
 	if source == null:
-		return error_not_found("Source node '%s'" % source_path)
+		return error_node_not_found(source_path)
 
 	var target := find_node_by_path(target_path)
 	if target == null:
-		return error_not_found("Target node '%s'" % target_path)
+		return error_node_not_found(target_path)
 
 	if not source.has_signal(signal_name):
 		return error_invalid_params("Signal '%s' not found on %s" % [signal_name, source.get_class()])
@@ -898,11 +908,11 @@ func _disconnect_signal(params: Dictionary) -> Dictionary:
 
 	var source := find_node_by_path(source_path)
 	if source == null:
-		return error_not_found("Source node '%s'" % source_path)
+		return error_node_not_found(source_path)
 
 	var target := find_node_by_path(target_path)
 	if target == null:
-		return error_not_found("Target node '%s'" % target_path)
+		return error_node_not_found(target_path)
 
 	if not source.is_connected(signal_name, Callable(target, method_name)):
 		return success({"was_connected": false})
@@ -935,7 +945,7 @@ func _get_node_groups(params: Dictionary) -> Dictionary:
 
 	var node := find_node_by_path(node_path)
 	if node == null:
-		return error_not_found("Node '%s'" % node_path, "Use get_scene_tree to see available nodes")
+		return error_node_not_found(node_path)
 
 	var groups: Array = []
 	for group: StringName in node.get_groups():
@@ -967,7 +977,7 @@ func _set_node_groups(params: Dictionary) -> Dictionary:
 
 	var node := find_node_by_path(node_path)
 	if node == null:
-		return error_not_found("Node '%s'" % node_path, "Use get_scene_tree to see available nodes")
+		return error_node_not_found(node_path)
 
 	# Get current non-internal groups
 	var current_groups: Array = []

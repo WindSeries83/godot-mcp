@@ -632,12 +632,38 @@ static func is_safe_scene_path(node_path: String) -> bool:
 	return true
 
 
-## Find node by path in edited scene.
-## `node_path` must be relative to the edited scene root: "." for the root
-## itself, "Player/Camera" for a descendant, or "<RootName>/Player/Camera"
-## with the root name prefix. Absolute paths ("/root/...") and paths escaping
-## upward ("../...") are rejected.
+## Prefix marking a session handle rather than a NodePath. "@" cannot appear
+## in a Godot node name, so this can never collide with a real relative path
+## — no escaping/validation needed to tell the two apart.
+const HANDLE_PREFIX := "@id:"
+
+## The handle to hand back to a caller instead of (or alongside) a node_path,
+## when it's expected to keep addressing the node after an operation that
+## might rename or reparent it. See find_node_by_path() for resolution.
+func node_handle(node: Node) -> String:
+	return HANDLE_PREFIX + str(node.get_instance_id())
+
+
+## Find node by path — or by session handle — in the edited scene.
+##
+## `node_path` is either:
+##  - a path relative to the edited scene root: "." for the root itself,
+##    "Player/Camera" for a descendant, or "<RootName>/Player/Camera" with
+##    the root name prefix. Absolute paths ("/root/...") and paths escaping
+##    upward ("../...") are rejected.
+##  - a handle in the "@id:<instance_id>" form returned by get_scene_tree
+##    and several node-mutating commands (see node_handle()). Unlike a path,
+##    a handle survives the node being renamed or reparented within the same
+##    editor session, because it doesn't encode a path at all — it's the
+##    node's own object identity. It stops resolving once the node is freed
+##    or the scene is reloaded, rather than silently pointing at whatever
+##    unrelated node/object now happens to reuse that instance id (Godot
+##    never reuses a live id; a freed one simply resolves to null via
+##    is_instance_valid below).
 func find_node_by_path(node_path: String) -> Node:
+	if node_path.begins_with(HANDLE_PREFIX):
+		return _resolve_node_handle(node_path)
+
 	var root := get_edited_root()
 	if root == null:
 		return null
@@ -656,3 +682,41 @@ func find_node_by_path(node_path: String) -> Node:
 		if root.has_node(rel):
 			return root.get_node(rel)
 	return null
+
+
+func _resolve_node_handle(handle: String) -> Node:
+	var id_str := handle.substr(HANDLE_PREFIX.length())
+	if not id_str.is_valid_int():
+		return null
+	var obj := instance_from_id(id_str.to_int())
+	if obj == null or not is_instance_valid(obj) or not obj is Node:
+		return null
+	var node := obj as Node
+	var root := get_edited_root()
+	if root == null:
+		return null
+	# A handle must resolve inside the edited scene, same as a NodePath must
+	# — otherwise it would be a way to reach the live editor's own tree that
+	# is_safe_scene_path()'s absolute/".." rejection does not cover, since a
+	# handle carries no path segments for that check to inspect in the first
+	# place.
+	if node != root and not root.is_ancestor_of(node):
+		return null
+	return node
+
+
+func is_node_handle(ref: String) -> bool:
+	return ref.begins_with(HANDLE_PREFIX)
+
+
+## A "not found" error phrased for whichever kind of reference `ref` is —
+## generic wording for a bad path is actively misleading for a stale handle
+## (the node existed, the reference just no longer resolves), so this is
+## worth a distinct message at the handful of node-mutating call sites where
+## an agent is most likely to be chaining a handle across several calls.
+func error_node_not_found(ref: String) -> Dictionary:
+	if is_node_handle(ref):
+		return error(-32001, "Handle '%s' does not resolve to a node in the currently edited scene" % ref, {
+			"suggestion": "The node may have been freed, or the scene was reloaded/reopened since the handle was captured. Call get_scene_tree again for a fresh handle.",
+		})
+	return error_not_found("Node '%s'" % ref, "Use get_scene_tree to see available nodes")

@@ -18,6 +18,13 @@ static func get_node_tree(node: Node, root: Node = null, max_depth: int = -1, cu
 		"name": node.name,
 		"type": node.get_class(),
 		"path": "." if node == root else str(root.get_path_to(node)),
+		# Session-scoped handle (format must match base_command.gd's
+		# find_node_by_path/node_handle): stays valid across a rename or
+		# reparent, unlike "path" above, which breaks the moment either
+		# happens. Invalid after the scene is closed/reloaded, or the node
+		# freed — callers should re-fetch the tree rather than cache this
+		# indefinitely.
+		"handle": "@id:%d" % node.get_instance_id(),
 	}
 
 	# Add script info

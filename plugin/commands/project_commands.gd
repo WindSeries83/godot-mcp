@@ -1,6 +1,8 @@
 @tool
 extends "res://addons/godot_mcp/commands/base_command.gd"
 
+const PropertyParser := preload("res://addons/godot_mcp/utils/property_parser.gd")
+
 
 func get_commands() -> Dictionary:
 	return {
@@ -14,6 +16,7 @@ func get_commands() -> Dictionary:
 		"project_path_to_uid": _project_path_to_uid,
 		"add_autoload": _add_autoload,
 		"remove_autoload": _remove_autoload,
+		"classdb_describe": _classdb_describe,
 	}
 
 
@@ -104,6 +107,15 @@ func get_command_schemas() -> Dictionary:
 			"summary": "Unregister an autoload singleton and save project.godot.",
 			"params": {"name": {"type": "string", "required": true}},
 			"annotations": {"readOnly": false, "destructive": true, "idempotent": true},
+		},
+		"classdb_describe": {
+			"category": "project",
+			"summary": "ClassDB reflection for a Godot engine class: editor-visible properties (with default values), methods, signals, enum constants, whether it can be instantiated, its parent class, and its direct subclasses. Lets an agent look up real node/resource types and property names instead of guessing them.",
+			"params": {
+				"class_name": {"type": "string", "required": true, "desc": "A ClassDB class name, e.g. 'Sprite2D', 'RigidBody3D', 'Resource' — case-sensitive"},
+				"include_inherited": {"type": "bool", "required": false, "default": true, "desc": "Include properties/methods/signals/enums inherited from parent classes, not just this class's own"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
 		},
 	}
 
@@ -897,4 +909,69 @@ func _remove_autoload(params: Dictionary) -> Dictionary:
 		"name": autoload_name,
 		"old_path": old_value,
 		"removed": true,
+	})
+
+
+func _classdb_describe(params: Dictionary) -> Dictionary:
+	var result := require_string(params, "class_name")
+	if result[1] != null:
+		return result[1]
+	var cls: String = result[0]
+
+	if not ClassDB.class_exists(cls):
+		return error_not_found("Class '%s'" % cls, "ClassDB names are case-sensitive")
+
+	var include_inherited: bool = optional_bool(params, "include_inherited", true)
+	var no_inheritance := not include_inherited
+
+	var properties: Array = []
+	for prop: Dictionary in ClassDB.class_get_property_list(cls, no_inheritance):
+		if not (int(prop.get("usage", 0)) & PROPERTY_USAGE_EDITOR):
+			continue
+		properties.append({
+			"name": prop["name"],
+			"type": type_string(prop["type"]),
+			"hint_string": prop.get("hint_string", ""),
+			"default": PropertyParser.serialize_value(ClassDB.class_get_property_default_value(cls, prop["name"])),
+		})
+
+	var methods: Array = []
+	for m: Dictionary in ClassDB.class_get_method_list(cls, no_inheritance):
+		var args: Array = []
+		for arg: Dictionary in m.get("args", []):
+			args.append({"name": arg["name"], "type": type_string(arg["type"])})
+		var return_info: Dictionary = m.get("return", {})
+		methods.append({
+			"name": m["name"],
+			"args": args,
+			"return_type": type_string(int(return_info.get("type", TYPE_NIL))),
+		})
+
+	var signals: Array = []
+	for sig: Dictionary in ClassDB.class_get_signal_list(cls, no_inheritance):
+		var sig_args: Array = []
+		for arg: Dictionary in sig.get("args", []):
+			sig_args.append({"name": arg["name"], "type": type_string(arg["type"])})
+		signals.append({"name": sig["name"], "args": sig_args})
+
+	var enums: Dictionary = {}
+	for enum_name: StringName in ClassDB.class_get_enum_list(cls, no_inheritance):
+		var constants: Dictionary = {}
+		for const_name: StringName in ClassDB.class_get_enum_constants(cls, enum_name, no_inheritance):
+			constants[str(const_name)] = ClassDB.class_get_integer_constant(cls, const_name)
+		enums[str(enum_name)] = constants
+
+	var inheriters: Array = []
+	for sub: StringName in ClassDB.get_inheriters_from_class(cls):
+		inheriters.append(str(sub))
+
+	return success({
+		"class_name": cls,
+		"inherits": str(ClassDB.get_parent_class(cls)),
+		"can_instantiate": ClassDB.can_instantiate(cls),
+		"properties": properties,
+		"methods": methods,
+		"signals": signals,
+		"enums": enums,
+		"direct_subclasses": inheriters,
 	})

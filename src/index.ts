@@ -352,7 +352,12 @@ const server = new Server(
 const TOOL_DEFS = [
   {
     name: "godot_call",
-    description: "Call any method on the Godot editor addon. See godot_list_methods to browse what's available and godot_describe for a method's full parameter schema.",
+    description:
+      "Call any method on the Godot editor addon. See godot_list_methods to browse what's available and " +
+      "godot_describe for a method's full parameter schema. Any 'node_path' parameter also accepts a session " +
+      "handle (the \"@id:...\" string returned as \"handle\" by get_scene_tree, add_node, and similar methods) " +
+      "instead of a path — a handle keeps addressing the same node across a rename or reparent, where a path " +
+      "would break. Handles go stale when the scene is reloaded/reopened; get_scene_tree again for fresh ones.",
     inputSchema: {
       type: "object",
       properties: {
