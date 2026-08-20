@@ -1,14 +1,25 @@
 extends SceneTree
 
 ## Headless test runner for the parts of the Godot addon that don't need a
-## running editor: PropertyParser's Variant coercion and BaseCommand's
-## scene-path safety guard. Run with:
+## running editor: PropertyParser's Variant coercion, BaseCommand's
+## scene-path safety guard and overwrite guard, and command_router.gd's
+## confirm gate. Run with:
 ##   godot --headless --path test/godot --script res://run_tests.gd
+## (or `npm run test:godot`, which also stages the addons/godot_mcp/ copy
+## command_router.gd needs — see run-godot-tests.mjs).
 ##
 ## The addon lives at plugin/ in the repo root, not inside this fixture
-## project (see project.godot), so the real .gd files are loaded by an
-## absolute path resolved at runtime — there is nothing here duplicating
-## plugin/ code for these tests to drift out of sync with.
+## project (see project.godot), so PropertyParser and BaseCommand — which
+## have no preload() dependencies of their own — are loaded by an absolute
+## path resolved at runtime, with nothing here duplicating plugin/ code for
+## them to drift out of sync with. command_router.gd is the one exception:
+## it preload()s its 26 command modules by res:// path, which Godot resolves
+## at parse time against *this* project's root regardless of how
+## command_router.gd itself was loaded — so it only parses successfully when
+## run-godot-tests.mjs has staged an ephemeral plugin/ copy at
+## addons/godot_mcp/ first. Running this file directly (not through
+## `npm run test:godot`) without that copy in place will fail the
+## command_router.gd load and skip its dependent tests via _require_loaded().
 ##
 ## Exits with a non-zero code on any failure, so this composes with a CI
 ## step or `npm run test:godot` without extra parsing.

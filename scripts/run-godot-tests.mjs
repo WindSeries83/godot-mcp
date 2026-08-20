@@ -10,6 +10,7 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { cpSync, rmSync } from "node:fs";
 
 const repoRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const fixtureProject = path.join(repoRoot, "test", "godot");
@@ -35,11 +36,29 @@ if (!bin) {
   process.exit(0);
 }
 
-console.log(`Running headless GDScript tests with ${bin}...`);
-const result = spawnSync(
-  bin,
-  ["--headless", "--path", fixtureProject, "--script", "res://run_tests.gd"],
-  { stdio: "inherit" }
-);
+// command_router.gd preload()s its 26 command modules by res:// path, and
+// preload() is resolved at parse time — before any of run_tests.gd's own
+// code runs. Since res:// always means "this project's root" regardless of
+// how the script itself was load()ed, command_router.gd can only ever parse
+// successfully inside a project that actually has an addons/godot_mcp/ at
+// its root, which this fixture project deliberately doesn't keep committed
+// (see test/godot/project.godot's comment). So: stage an ephemeral copy of
+// plugin/ here before running, and remove it after — the repo's source of
+// truth stays exactly plugin/, nothing here is meant to be committed.
+const fixtureAddonDir = path.join(fixtureProject, "addons", "godot_mcp");
+cpSync(path.join(repoRoot, "plugin"), fixtureAddonDir, { recursive: true });
 
-process.exit(result.status ?? 1);
+let status = 1;
+try {
+  console.log(`Running headless GDScript tests with ${bin}...`);
+  const result = spawnSync(
+    bin,
+    ["--headless", "--path", fixtureProject, "--script", "res://run_tests.gd"],
+    { stdio: "inherit" }
+  );
+  status = result.status ?? 1;
+} finally {
+  rmSync(fixtureAddonDir, { recursive: true, force: true });
+}
+
+process.exit(status);

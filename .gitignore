@@ -2,3 +2,4 @@ node_modules/
 dist/
 *.tsbuildinfo
 test/godot/.godot/
+test/godot/addons/
