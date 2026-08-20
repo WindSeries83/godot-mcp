@@ -41,6 +41,9 @@ var _watch_start_msec: int = 0
 var _watch_duration_ms: int = 5000
 var _watch_connections: Array = []  # Array of {node, signal, callable} for cleanup
 
+# Determinism / snapshot state
+var _snapshots: Dictionary = {}  # name -> {node_path: {prop: value}}
+
 # Move-to state
 var _moveto_target: Vector3 = Vector3.ZERO
 var _moveto_player: Node3D = null
@@ -163,6 +166,12 @@ func _handle_request() -> void:
 			_cmd_assert_node_state(params)
 		"get_performance_monitors":
 			_cmd_get_performance_monitors(params)
+		"set_determinism":
+			_cmd_set_determinism(params)
+		"snapshot_state":
+			_cmd_snapshot_state(params)
+		"restore_state":
+			_cmd_restore_state(params)
 		_:
 			_write_response({"error": "Unknown command: %s" % command})
 
@@ -1774,3 +1783,193 @@ func _serialize_value(value: Variant) -> Variant:
 			return result
 		_:
 			return value
+
+
+# ── set_determinism ───────────────────────────────────────────────────────────
+
+## Pins the sources of run-to-run variance so a playtest can be replayed and
+## compared. Honest about its limits: this seeds the GLOBAL RNG (the one behind
+## randi/randf/randi_range) and fixes the physics tick, but it cannot reach
+## RandomNumberGenerator instances the game created itself, nor make _process
+## delta perfectly constant — pinning max_fps to the physics rate only makes it
+## near-constant. Physics-driven logic is the part that becomes reproducible.
+func _cmd_set_determinism(params: Dictionary) -> void:
+	var applied := {}
+
+	if params.has("seed"):
+		var raw_seed: Variant = params["seed"]
+		if not (raw_seed is int or raw_seed is float):
+			_write_response({"error": "'seed' must be a number"})
+			return
+		var seed_value := int(raw_seed)
+		seed(seed_value)
+		applied["seed"] = seed_value
+
+	if params.has("physics_ticks_per_second"):
+		var raw_ticks: Variant = params["physics_ticks_per_second"]
+		if not (raw_ticks is int or raw_ticks is float):
+			_write_response({"error": "'physics_ticks_per_second' must be a number"})
+			return
+		var ticks := int(raw_ticks)
+		if ticks < 1 or ticks > 1000:
+			_write_response({"error": "'physics_ticks_per_second' must be between 1 and 1000"})
+			return
+		Engine.physics_ticks_per_second = ticks
+		applied["physics_ticks_per_second"] = ticks
+
+	if params.has("max_fps"):
+		var raw_fps: Variant = params["max_fps"]
+		if not (raw_fps is int or raw_fps is float):
+			_write_response({"error": "'max_fps' must be a number"})
+			return
+		var fps := int(raw_fps)
+		if fps < 0 or fps > 1000:
+			_write_response({"error": "'max_fps' must be between 0 (uncapped) and 1000"})
+			return
+		Engine.max_fps = fps
+		applied["max_fps"] = fps
+
+	if params.has("time_scale"):
+		var raw_scale: Variant = params["time_scale"]
+		if not (raw_scale is int or raw_scale is float):
+			_write_response({"error": "'time_scale' must be a number"})
+			return
+		var scale := float(raw_scale)
+		if scale <= 0.0 or scale > 100.0:
+			_write_response({"error": "'time_scale' must be > 0 and <= 100"})
+			return
+		Engine.time_scale = scale
+		applied["time_scale"] = scale
+
+	_write_response({
+		"applied": applied,
+		"current": {
+			"physics_ticks_per_second": Engine.physics_ticks_per_second,
+			"max_fps": Engine.max_fps,
+			"time_scale": Engine.time_scale,
+		},
+		"caveats": [
+			"Seeds only the global RNG; RandomNumberGenerator instances the game owns keep their own seeds.",
+			"_process delta is near-constant when max_fps is pinned, not exactly fixed; _physics_process is the deterministic one.",
+		],
+	})
+
+
+# ── snapshot_state / restore_state ────────────────────────────────────────────
+
+## Records the current value of each node's storage properties (or an explicit
+## property list) under a name, so a scenario can be re-run from the same
+## starting state without restarting the whole game.
+func _cmd_snapshot_state(params: Dictionary) -> void:
+	var snapshot_name: String = params.get("name", "")
+	if snapshot_name.is_empty():
+		_write_response({"error": "Missing required parameter: name"})
+		return
+
+	var raw_paths: Variant = params.get("node_paths", [])
+	if not raw_paths is Array or (raw_paths as Array).is_empty():
+		_write_response({"error": "'node_paths' must be a non-empty array of node paths"})
+		return
+	var node_paths: Array = raw_paths
+	var wanted_props: Array = params.get("properties", []) if params.get("properties", []) is Array else []
+
+	var root := get_tree().current_scene
+	if root == null:
+		_write_response({"error": "No current scene"})
+		return
+
+	var captured := {}
+	var missing: Array = []
+	for raw_path in node_paths:
+		var path_str := str(raw_path)
+		var node := root.get_node_or_null(NodePath(path_str))
+		if node == null:
+			missing.append(path_str)
+			continue
+		captured[path_str] = _capture_node_state(node, wanted_props)
+
+	if captured.is_empty():
+		_write_response({"error": "None of the given node_paths resolved", "missing": missing})
+		return
+
+	_snapshots[snapshot_name] = captured
+	var prop_total := 0
+	for path_key in captured:
+		prop_total += (captured[path_key] as Dictionary).size()
+
+	_write_response({
+		"name": snapshot_name,
+		"nodes_captured": captured.size(),
+		"properties_captured": prop_total,
+		"missing_nodes": missing,
+	})
+
+
+## Raw (unserialised) property values for one node. Unlike _serialize_value's
+## output these are kept as real Variants so restore can assign them straight
+## back — a serialised Vector3 dict would not round-trip.
+func _capture_node_state(node: Node, wanted_props: Array) -> Dictionary:
+	var state := {}
+	if not wanted_props.is_empty():
+		for raw_prop in wanted_props:
+			var prop_name := str(raw_prop)
+			var value: Variant = node.get(prop_name)
+			if value != null:
+				state[prop_name] = value
+		return state
+
+	for prop_info in node.get_property_list():
+		var usage: int = prop_info.get("usage", 0)
+		if not (usage & PROPERTY_USAGE_STORAGE):
+			continue
+		var prop_name: String = prop_info.get("name", "")
+		if prop_name.is_empty() or prop_name.begins_with("script"):
+			continue
+		state[prop_name] = node.get(prop_name)
+	return state
+
+
+func _cmd_restore_state(params: Dictionary) -> void:
+	var snapshot_name: String = params.get("name", "")
+	if snapshot_name.is_empty():
+		_write_response({"error": "Missing required parameter: name"})
+		return
+	if not _snapshots.has(snapshot_name):
+		_write_response({
+			"error": "No snapshot named '%s'" % snapshot_name,
+			"available": _snapshots.keys(),
+		})
+		return
+
+	var root := get_tree().current_scene
+	if root == null:
+		_write_response({"error": "No current scene"})
+		return
+
+	var captured: Dictionary = _snapshots[snapshot_name]
+	var restored := 0
+	var failed: Array = []
+	var missing: Array = []
+
+	for path_str: String in captured:
+		var node := root.get_node_or_null(NodePath(path_str))
+		if node == null:
+			missing.append(path_str)
+			continue
+		var state: Dictionary = captured[path_str]
+		for prop_name: String in state:
+			# A property that was readable at capture time can still be
+			# read-only or gone now (scene reloaded, script swapped); skip it
+			# and report rather than aborting a partial restore.
+			if not (prop_name in node):
+				failed.append("%s.%s (no longer exists)" % [path_str, prop_name])
+				continue
+			node.set(prop_name, state[prop_name])
+			restored += 1
+
+	_write_response({
+		"name": snapshot_name,
+		"properties_restored": restored,
+		"missing_nodes": missing,
+		"failed_properties": failed,
+	})

@@ -12,6 +12,9 @@ func get_commands() -> Dictionary:
 		"assert_screen_text": _assert_screen_text,
 		"run_stress_test": _run_stress_test,
 		"get_test_report": _get_test_report,
+		"set_determinism": _set_determinism,
+		"snapshot_state": _snapshot_state,
+		"restore_state": _restore_state,
 	}
 
 
@@ -63,6 +66,35 @@ func get_command_schemas() -> Dictionary:
 				"clear": {"type": "bool", "required": false, "default": true, "desc": "Clear the accumulated results after reporting"},
 			},
 			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"set_determinism": {
+			"category": "test",
+			"summary": "Pins the running game's sources of run-to-run variance (global RNG seed, physics tick rate, max FPS, time scale) so a playtest can be replayed and compared. Returns the applied values plus explicit caveats about what it cannot make deterministic. Call before run_test_scenario for reproducible runs.",
+			"params": {
+				"seed": {"type": "int", "required": false, "desc": "Seed for the global RNG behind randi/randf/randi_range. Does not reach RandomNumberGenerator instances the game created itself"},
+				"physics_ticks_per_second": {"type": "int", "required": false, "desc": "Fixed physics tick rate, 1-1000. This is what actually makes _physics_process logic reproducible"},
+				"max_fps": {"type": "int", "required": false, "desc": "Frame cap, 0-1000 (0 = uncapped). Pin to the physics rate to keep _process delta near-constant"},
+				"time_scale": {"type": "float", "required": false, "desc": "Engine.time_scale, > 0 and <= 100. Useful to fast-forward a scenario"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"snapshot_state": {
+			"category": "test",
+			"summary": "Records the current property values of the given running-game nodes under a name, so a scenario can be re-run from the same starting state without restarting the game. Pairs with restore_state.",
+			"params": {
+				"name": {"type": "string", "required": true, "desc": "Name to store this snapshot under; reusing a name overwrites it"},
+				"node_paths": {"type": "array", "required": true, "desc": "Scene-relative paths of the nodes to capture"},
+				"properties": {"type": "array", "required": false, "default": [], "desc": "Property names to capture; if omitted, every storage property of each node"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"restore_state": {
+			"category": "test",
+			"summary": "Writes a snapshot taken by snapshot_state back onto the running game's nodes. Reports nodes that vanished and properties that could not be reapplied instead of failing the whole restore.",
+			"params": {
+				"name": {"type": "string", "required": true, "desc": "Name of a snapshot previously taken with snapshot_state"},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": true},
 		},
 	}
 
@@ -562,3 +594,62 @@ func _count_log_errors() -> int:
 				if line.contains("ERROR") or line.contains("SCRIPT ERROR"):
 					count += 1
 	return count
+
+
+# ── Determinism / state snapshots ─────────────────────────────────────────────
+
+func _set_determinism(params: Dictionary) -> Dictionary:
+	## Forwards only the keys the caller actually supplied, so an omitted knob
+	## keeps whatever the game currently has rather than being reset to a
+	## default the caller never asked for.
+	var forwarded := {}
+	for key: String in ["seed", "physics_ticks_per_second", "max_fps", "time_scale"]:
+		if params.has(key):
+			forwarded[key] = params[key]
+
+	if forwarded.is_empty():
+		return error_invalid_params(
+			"Supply at least one of: seed, physics_ticks_per_second, max_fps, time_scale"
+		)
+
+	var result := await send_game_command("set_determinism", forwarded)
+	if result.has("error"):
+		return result
+	return success(unwrap_game_result(result))
+
+
+func _snapshot_state(params: Dictionary) -> Dictionary:
+	var name_result := require_string(params, "name")
+	if name_result[1] != null:
+		return name_result[1]
+	var snapshot_name: String = name_result[0]
+
+	var raw_paths: Variant = params.get("node_paths")
+	if raw_paths == null:
+		return error_invalid_params("Missing required parameter: node_paths (array of node paths)")
+	if not raw_paths is Array or (raw_paths as Array).is_empty():
+		return error_invalid_params("'node_paths' must be a non-empty array of node paths")
+
+	var forwarded := {
+		"name": snapshot_name,
+		"node_paths": raw_paths,
+	}
+	var raw_props: Variant = params.get("properties", [])
+	if raw_props is Array:
+		forwarded["properties"] = raw_props
+
+	var result := await send_game_command("snapshot_state", forwarded)
+	if result.has("error"):
+		return result
+	return success(unwrap_game_result(result))
+
+
+func _restore_state(params: Dictionary) -> Dictionary:
+	var name_result := require_string(params, "name")
+	if name_result[1] != null:
+		return name_result[1]
+
+	var result := await send_game_command("restore_state", {"name": name_result[0]})
+	if result.has("error"):
+		return result
+	return success(unwrap_game_result(result))
