@@ -556,9 +556,22 @@ func is_debugger_paused() -> bool:
 	return btn != null and not btn.disabled
 
 
-## Read recent runtime errors from the debugger's "Errors" tab tree, so a
-## timeout caused by a script error can report the actual cause inline.
+## Read recent runtime errors, so a timeout caused by a script error can
+## report the actual cause inline. Prefers the structured ring buffer fed by
+## mcp_debugger_plugin.gd's "debug_data" hook; falls back to scraping the
+## debugger's "Errors" tab Tree only if that buffer isn't available (e.g. the
+## hook failed to attach on this Godot version — see mcp_debugger_plugin.gd).
 func collect_debugger_errors(max_errors: int = 10) -> Array:
+	var store: RefCounted = editor_plugin.error_store if "error_store" in editor_plugin else null
+	if store != null and not store.is_empty():
+		var out_store: Array = []
+		for entry: Dictionary in store.get_since(0, max_errors, true):
+			var tag: String = "WARNING" if entry.get("is_warning", false) else "ERROR"
+			out_store.append("%s: %s:%d - %s" % [
+				tag, entry.get("file", ""), entry.get("line", 0), entry.get("description", entry.get("error", "")),
+			])
+		return out_store
+
 	var out: Array = []
 	var dbg := _find_script_editor_debugger()
 	if dbg == null:

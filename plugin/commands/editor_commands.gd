@@ -5,6 +5,8 @@ extends "res://addons/godot_mcp/commands/base_command.gd"
 func get_commands() -> Dictionary:
 	return {
 		"get_editor_errors": _get_editor_errors,
+		"get_runtime_errors": _get_runtime_errors,
+		"clear_runtime_errors": _clear_runtime_errors,
 		"get_output_log": _get_output_log,
 		"get_editor_screenshot": _get_editor_screenshot,
 		"get_game_screenshot": _get_game_screenshot,
@@ -29,6 +31,22 @@ func get_command_schemas() -> Dictionary:
 				"max_lines": {"type": "int", "required": false, "default": 50, "desc": "How many trailing Output panel / log lines to scan"},
 			},
 			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"get_runtime_errors": {
+			"category": "editor",
+			"summary": "Structured runtime errors/warnings captured from the running game (push_error/SCRIPT ERROR/unhandled GDScript exceptions), with file/function/line and a full call stack per entry — not the merged string list get_editor_errors returns. Backed by a ring buffer fed off the debugger's message stream; empty if no game has run since the editor opened.",
+			"params": {
+				"since_seq": {"type": "int", "required": false, "default": 0, "desc": "Only return entries with seq greater than this — poll with the highest seq from a previous call to get only new errors, race-free even across clear_runtime_errors"},
+				"max": {"type": "int", "required": false, "default": 50, "desc": "Maximum entries to return"},
+				"include_warnings": {"type": "bool", "required": false, "default": true, "desc": "Include warning-level entries, not just errors"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"clear_runtime_errors": {
+			"category": "editor",
+			"summary": "Empties the runtime error buffer. The sequence counter is NOT reset, so a caller holding an old since_seq value continues to get correct results instead of the buffer appearing to restart.",
+			"params": {},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
 		},
 		"get_output_log": {
 			"category": "editor",
@@ -207,54 +225,19 @@ func _get_editor_errors(params: Dictionary) -> Dictionary:
 						var prefix: String = "SCRIPT ERROR: %s:" % script_path if not script_path.is_empty() else "SCRIPT ERROR: "
 						analyzer_errors.append(prefix + stripped)
 
-	# 4. Read from the debugger Errors tab (runtime errors/warnings)
-	#    Path: ScriptEditorDebugger > TabContainer > "Errors" VBoxContainer > Tree
+	# 4. Runtime errors from mcp_error_store.gd, fed by mcp_debugger_plugin.gd's
+	#    hook on ScriptEditorDebugger's "debug_data" signal — structured
+	#    file/line/backtrace, not a Tree-widget scrape. See get_runtime_errors
+	#    for the structured form; this is a flat string rendering for callers
+	#    of get_editor_errors that just want one merged list.
 	var debugger_errors: Array = []
-	var base2: Control = get_editor().get_base_control()
-	if base2:
-		var queue: Array[Node] = [base2]
-		while not queue.is_empty():
-			var node: Node = queue.pop_front()
-			if node.get_class() == "ScriptEditorDebugger":
-				# Find TabContainer inside the debugger
-				for child in node.get_children():
-					if child is TabContainer:
-						var tab_container := child as TabContainer
-						for tab_idx in range(tab_container.get_tab_count()):
-							var tab_control: Control = tab_container.get_tab_control(tab_idx)
-							if tab_control is VBoxContainer and tab_control.name.begins_with("Errors"):
-								# Find Tree inside the Errors tab
-								for vchild in tab_control.get_children():
-									if vchild is Tree:
-										var tree := vchild as Tree
-										var root_item: TreeItem = tree.get_root()
-										if root_item:
-											var item: TreeItem = root_item.get_first_child()
-											while item:
-												var col0: String = item.get_text(0).strip_edges()
-												var col1: String = item.get_text(1).strip_edges()
-												if not col0.is_empty() or not col1.is_empty():
-													var msg: String = col0
-													if not col1.is_empty():
-														msg += " " + col1 if not msg.is_empty() else col1
-													debugger_errors.append("DEBUGGER: " + msg)
-												# Also check child items (expanded error details)
-												var sub: TreeItem = item.get_first_child()
-												while sub:
-													var sub0: String = sub.get_text(0).strip_edges()
-													var sub1: String = sub.get_text(1).strip_edges()
-													if not sub0.is_empty() or not sub1.is_empty():
-														var sub_msg: String = sub0
-														if not sub1.is_empty():
-															sub_msg += " " + sub1 if not sub_msg.is_empty() else sub1
-														debugger_errors.append("DEBUGGER:   " + sub_msg)
-													sub = sub.get_next()
-												item = item.get_next()
-								break  # Found Errors tab, stop searching tabs
-						break  # Found TabContainer, stop searching debugger children
-				break  # Found ScriptEditorDebugger, stop BFS
-			for child in node.get_children():
-				queue.append(child)
+	var store: RefCounted = editor_plugin.error_store if "error_store" in editor_plugin else null
+	if store != null:
+		for entry: Dictionary in store.get_since(0, max_lines, true):
+			var tag: String = "DEBUGGER WARNING" if entry.get("is_warning", false) else "DEBUGGER ERROR"
+			debugger_errors.append("%s: %s:%d - %s" % [
+				tag, entry.get("file", ""), entry.get("line", 0), entry.get("description", entry.get("error", "")),
+			])
 
 	# Fallback: read from log file if Output panel not accessible
 	if errors.size() == 0 and script_errors.size() == 0 and analyzer_errors.size() == 0 and debugger_errors.size() == 0:
@@ -275,6 +258,31 @@ func _get_editor_errors(params: Dictionary) -> Dictionary:
 	errors.append_array(analyzer_errors)
 	errors.append_array(debugger_errors)
 	return success({"errors": errors, "count": errors.size()})
+
+
+func _get_runtime_errors(params: Dictionary) -> Dictionary:
+	var store: RefCounted = editor_plugin.error_store if "error_store" in editor_plugin else null
+	if store == null:
+		return error_internal("Runtime error store not initialized")
+
+	var since_seq: int = optional_int(params, "since_seq", 0)
+	var max_count: int = optional_int(params, "max", 50)
+	var include_warnings: bool = optional_bool(params, "include_warnings", true)
+
+	var entries: Array[Dictionary] = store.get_since(since_seq, max_count, include_warnings)
+	return success({
+		"errors": entries,
+		"count": entries.size(),
+		"latest_seq": store.current_seq(),
+	})
+
+
+func _clear_runtime_errors(_params: Dictionary) -> Dictionary:
+	var store: RefCounted = editor_plugin.error_store if "error_store" in editor_plugin else null
+	if store == null:
+		return error_internal("Runtime error store not initialized")
+	store.clear()
+	return success({"cleared": true, "seq_preserved": store.current_seq()})
 
 
 func _get_output_log(params: Dictionary) -> Dictionary:

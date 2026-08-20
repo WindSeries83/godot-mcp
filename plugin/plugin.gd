@@ -23,8 +23,18 @@ var auto_dismiss_dialogs: bool = false
 # Track which autoloads THIS session injected (vs project-owned)
 var _session_injected_autoloads: Array[String] = []
 
+## Read by editor_commands.gd / base_command.gd via editor_plugin.error_store
+## (same dynamic-access pattern already used for auto_dismiss_dialogs above).
+var error_store: RefCounted
+var _debugger_plugin: EditorDebuggerPlugin
+
 func _enter_tree() -> void:
 	_register_project_settings()
+
+	error_store = preload("res://addons/godot_mcp/mcp_error_store.gd").new()
+	_debugger_plugin = preload("res://addons/godot_mcp/mcp_debugger_plugin.gd").new()
+	_debugger_plugin.error_store = error_store
+	add_debugger_plugin(_debugger_plugin)
 
 	# Create command router
 	command_router = preload("res://addons/godot_mcp/command_router.gd").new()
@@ -59,6 +69,12 @@ func _exit_tree() -> void:
 	# Remove MCP autoloads and clean up temp files
 	_remove_autoloads()
 	_cleanup_temp_files()
+
+	if _debugger_plugin:
+		_debugger_plugin.disconnect_all()
+		remove_debugger_plugin(_debugger_plugin)
+		_debugger_plugin = null
+	error_store = null
 
 	if websocket_server:
 		websocket_server.stop_server()
