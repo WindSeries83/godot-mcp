@@ -61,9 +61,74 @@ func _register_commands() -> void:
 			for method_name: String in schemas:
 				_command_schemas[method_name] = schemas[method_name]
 
+	_register_user_commands()
 	_register_meta_commands()
 
 	print("[MCP] Registered %d commands (%d with schemas)" % [_command_handlers.size(), _command_schemas.size()])
+
+
+## Project-side extension point: any *.gd file dropped into
+## res://addons/godot_mcp_user_commands/ that extends base_command.gd and
+## exposes get_commands() (optionally get_command_schemas()) is picked up
+## automatically, same as a built-in module — no fork of this repo needed.
+## Lives outside plugin/ so it isn't wiped out by an addon update.
+func _register_user_commands() -> void:
+	const USER_COMMANDS_DIR := "res://addons/godot_mcp_user_commands"
+	if not DirAccess.dir_exists_absolute(USER_COMMANDS_DIR):
+		return
+	var dir := DirAccess.open(USER_COMMANDS_DIR)
+	if dir == null:
+		return
+
+	var registered := 0
+	dir.list_dir_begin()
+	var file_name := dir.get_next()
+	while file_name != "":
+		if not dir.current_is_dir() and file_name.ends_with(".gd"):
+			if _register_user_command_file(USER_COMMANDS_DIR + "/" + file_name):
+				registered += 1
+		file_name = dir.get_next()
+	dir.list_dir_end()
+
+	if registered > 0:
+		print("[MCP] Registered %d user command module(s) from %s" % [registered, USER_COMMANDS_DIR])
+
+
+## Loads and registers a single *.gd file from the user command modules
+## directory. Returns false (and just warns) instead of crashing addon
+## startup when the file isn't a valid command module, since this directory
+## is user-edited and may contain a script mid-edit or with a typo.
+func _register_user_command_file(script_path: String) -> bool:
+	var script: Variant = load(script_path)
+	if script == null or not (script is Script):
+		push_warning("[MCP] Could not load user command module '%s'" % script_path)
+		return false
+
+	var cmd: Object = (script as Script).new()
+	if not (cmd is Node) or not cmd.has_method("get_commands"):
+		push_warning("[MCP] '%s' does not look like a command module (must extend base_command.gd and expose get_commands()); skipped" % script_path)
+		return false
+
+	if "editor_plugin" in cmd:
+		cmd.editor_plugin = editor_plugin
+	add_child(cmd)
+
+	var methods: Dictionary = cmd.get_commands()
+	var added_names: Array = []
+	for method_name: String in methods:
+		if _command_handlers.has(method_name):
+			push_warning("[MCP] User command module '%s' redefines existing method '%s'; ignoring to protect built-ins" % [script_path, method_name])
+			continue
+		_command_handlers[method_name] = methods[method_name]
+		added_names.append(method_name)
+
+	if cmd.has_method("get_command_schemas"):
+		var schemas: Dictionary = cmd.get_command_schemas()
+		for method_name: String in schemas:
+			if method_name in added_names:
+				_command_schemas[method_name] = schemas[method_name]
+
+	return true
 
 
 ## Router-level commands (get_available_methods, describe_methods,

@@ -15,6 +15,7 @@ func get_commands() -> Dictionary:
 		"add_gridmap": _add_gridmap,
 		"get_spatial_bounds": _get_spatial_bounds,
 		"turntable_screenshot": _turntable_screenshot,
+		"isolate_screenshot": _isolate_screenshot,
 		"snap_to_ground": _snap_to_ground,
 		"align_nodes": _align_nodes,
 		"distribute_nodes": _distribute_nodes,
@@ -173,6 +174,20 @@ func get_command_schemas() -> Dictionary:
 				"padding": {"type": "float", "required": false, "default": 1.4, "desc": "Framing margin multiplier around the bounds, clamped 1.0-5.0"},
 				"thumb_size": {"type": "int", "required": false, "default": 384, "desc": "Width/height in pixels of each view before tiling, clamped 64-1024"},
 				"save_path": {"type": "string", "required": false, "default": "", "desc": "If given, save the composed sheet here (res://, user://, or absolute) instead of returning base64"},
+				"overwrite": {"type": "bool", "required": false, "default": false, "desc": "Overwrite an existing file at save_path"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"isolate_screenshot": {
+			"category": "3d",
+			"summary": "Renders a single Node3D from one angle with every other VisualInstance3D in the scene temporarily hidden, so the capture shows only that node — for inspecting one asset/prop without the rest of the scene as visual noise. Restores visibility and camera afterward. Does not work under --headless (same limitation as get_editor_screenshot). Refuses to overwrite an existing file at save_path unless overwrite is set.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to the Node3D to isolate and frame"},
+				"azimuth_degrees": {"type": "float", "required": false, "default": 45.0, "desc": "Camera angle around the node, 0-360"},
+				"elevation_degrees": {"type": "float", "required": false, "default": 25.0, "desc": "Camera elevation above the horizontal plane"},
+				"padding": {"type": "float", "required": false, "default": 1.4, "desc": "Framing margin multiplier around the bounds, clamped 1.0-5.0"},
+				"thumb_size": {"type": "int", "required": false, "default": 512, "desc": "Width/height in pixels of the captured image, clamped 64-2048"},
+				"save_path": {"type": "string", "required": false, "default": "", "desc": "If given, save the PNG here (res://, user://, or absolute) instead of returning base64"},
 				"overwrite": {"type": "bool", "required": false, "default": false, "desc": "Overwrite an existing file at save_path"},
 			},
 			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
@@ -1150,6 +1165,125 @@ func _turntable_screenshot(params: Dictionary) -> Dictionary:
 	var png_buffer := sheet.save_png_to_buffer()
 	response["image_base64"] = Marshalls.raw_to_base64(png_buffer)
 	return success(response)
+
+
+## ─── 8b. isolate_screenshot ─────────────────────────────────────────────────
+
+func _isolate_screenshot(params: Dictionary) -> Dictionary:
+	var result := require_string(params, "node_path")
+	if result[1] != null:
+		return result[1]
+	var node_path: String = result[0]
+
+	var root := get_edited_root()
+	if root == null:
+		return error_no_scene()
+
+	var node := find_node_by_path(node_path)
+	if node == null:
+		return error_not_found("Node '%s'" % node_path)
+	if not node is Node3D:
+		return error_invalid_params("Node '%s' is a %s, not a Node3D" % [node_path, node.get_class()])
+
+	var azimuth_degrees: float = optional_float(params, "azimuth_degrees", 45.0)
+	var elevation_degrees: float = optional_float(params, "elevation_degrees", 25.0)
+	var padding: float = clampf(optional_float(params, "padding", 1.4), 1.0, 5.0)
+	var thumb_size: int = clampi(optional_int(params, "thumb_size", 512), 64, 2048)
+
+	var aabb: Variant = _world_aabb_of(node, true)
+	if aabb == null:
+		return error(-32000, "No visual geometry found under '%s'" % node_path, {
+			"suggestion": "The node (or a child) must contain a VisualInstance3D such as MeshInstance3D",
+		})
+	var b: AABB = aabb
+	var center := b.get_center()
+	var radius: float = maxf(b.size.length() / 2.0, 0.05)
+
+	var vp3d := EditorInterface.get_editor_viewport_3d()
+	var cam := vp3d.get_camera_3d() if vp3d else null
+	if not cam:
+		return error(-32000, "No 3D editor camera found", {"suggestion": "Open a 3D scene in the editor"})
+
+	# Hide every other visible VisualInstance3D in the scene so the capture
+	# shows only `node`'s own subtree; restored unconditionally below.
+	var hidden: Array[VisualInstance3D] = []
+	_hide_other_visuals(root, node, hidden)
+
+	var orig_transform := cam.global_transform
+	var orig_fov := cam.fov
+	var fov := 50.0
+	var distance: float = radius * padding / sin(deg_to_rad(fov * 0.5))
+	cam.fov = fov
+
+	var elevation_rad := deg_to_rad(elevation_degrees)
+	var azimuth_rad := deg_to_rad(azimuth_degrees)
+	var dir := Vector3(
+		cos(elevation_rad) * sin(azimuth_rad),
+		sin(elevation_rad),
+		cos(elevation_rad) * cos(azimuth_rad)
+	)
+	cam.global_position = center + dir * distance
+	cam.look_at(center, Vector3.UP)
+
+	# Same reasoning as turntable_screenshot: the camera/visibility changes
+	# only take effect in a subsequently rendered frame.
+	await RenderingServer.frame_post_draw
+
+	var base_control: Control = get_editor().get_base_control()
+	var viewport: Viewport = base_control.get_viewport() if base_control else null
+	var texture: ViewportTexture = viewport.get_texture() if viewport else null
+	var image: Image = texture.get_image() if texture else null
+
+	cam.global_transform = orig_transform
+	cam.fov = orig_fov
+	for vi in hidden:
+		vi.visible = true
+
+	if image == null:
+		return error_internal("Could not capture a frame for isolated screenshot")
+
+	image.resize(thumb_size, thumb_size, Image.INTERPOLATE_LANCZOS)
+	if image.get_format() != Image.FORMAT_RGBA8:
+		image.convert(Image.FORMAT_RGBA8)
+
+	var response := {
+		"width": image.get_width(),
+		"height": image.get_height(),
+		"azimuth_degrees": azimuth_degrees,
+		"elevation_degrees": elevation_degrees,
+		"format": "png",
+	}
+
+	var save_path: String = optional_string(params, "save_path", "")
+	if not save_path.is_empty():
+		var overwrite_guard := guard_overwrite(save_path, optional_bool(params, "overwrite"))
+		if overwrite_guard.has("error"):
+			return overwrite_guard
+		var abs_path := resolve_save_path(save_path)
+		var err := image.save_png(abs_path)
+		if err != OK:
+			return error_internal("Failed to save isolated screenshot: %s" % error_string(err))
+		response["saved_path"] = save_path
+		return success(response)
+
+	var png_buffer := image.save_png_to_buffer()
+	response["image_base64"] = Marshalls.raw_to_base64(png_buffer)
+	return success(response)
+
+
+## Recursively hides visible VisualInstance3D nodes under `search_root` that
+## fall outside `target`'s own subtree, recording each one so the caller can
+## restore visibility afterward. Already-invisible nodes are left alone (not
+## recorded), so restoring won't wrongly make them visible.
+func _hide_other_visuals(search_root: Node, target: Node, hidden: Array[VisualInstance3D]) -> void:
+	if search_root == target:
+		return
+	if search_root is VisualInstance3D and (search_root as VisualInstance3D).visible:
+		var vi := search_root as VisualInstance3D
+		vi.visible = false
+		hidden.append(vi)
+	for child in search_root.get_children():
+		_hide_other_visuals(child, target, hidden)
 
 
 ## ─── 9. snap_to_ground ──────────────────────────────────────────────────────
