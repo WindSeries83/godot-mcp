@@ -214,7 +214,7 @@ func _get_editor_errors(params: Dictionary) -> Dictionary:
 	if base2:
 		var queue: Array[Node] = [base2]
 		while not queue.is_empty():
-			var node := queue.pop_front()
+			var node: Node = queue.pop_front()
 			if node.get_class() == "ScriptEditorDebugger":
 				# Find TabContainer inside the debugger
 				for child in node.get_children():

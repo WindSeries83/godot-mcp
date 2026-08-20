@@ -508,7 +508,7 @@ static func _find_script_editor_debugger() -> Node:
 		return null
 	var queue: Array[Node] = [base]
 	while not queue.is_empty():
-		var node := queue.pop_front()
+		var node: Node = queue.pop_front()
 		if node.get_class() == "ScriptEditorDebugger":
 			return node
 		for child in node.get_children():
@@ -537,7 +537,7 @@ static func _find_debugger_continue_button() -> Button:
 	var fallback: Button = null
 	var inner: Array[Node] = [dbg]
 	while not inner.is_empty():
-		var n := inner.pop_front()
+		var n: Node = inner.pop_front()
 		if n is Button:
 			var b := n as Button
 			if continue_icon != null and b.icon == continue_icon:

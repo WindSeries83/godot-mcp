@@ -23,13 +23,32 @@ func _init() -> void:
 	var BaseCommand: Script = load(repo_root.path_join("plugin/commands/base_command.gd"))
 	var CommandRouter: Script = load(repo_root.path_join("plugin/command_router.gd"))
 
-	_test_property_parser(PropertyParser)
-	_test_is_safe_scene_path(BaseCommand)
-	_test_requires_confirm(CommandRouter)
-	_test_guard_overwrite(BaseCommand)
+	# A script with a parse error surfaces as SCRIPT ERROR output plus a null
+	# return from load() — it does NOT raise, so a test function called on a
+	# null Script fails on its first call with a "Nonexistent function" error
+	# that aborts just that function, silently, before _check() ever runs.
+	# Left unguarded, that reports a false green ("0 failed") instead of the
+	# real parse error further up the log — this is exactly what happened the
+	# first time this file ran in CI (see base_command.gd/editor_commands.gd
+	# ":=" pop_front() history). Fail loudly instead.
+	if _require_loaded("plugin/utils/property_parser.gd", PropertyParser):
+		_test_property_parser(PropertyParser)
+	if _require_loaded("plugin/commands/base_command.gd", BaseCommand):
+		_test_is_safe_scene_path(BaseCommand)
+		_test_guard_overwrite(BaseCommand)
+	if _require_loaded("plugin/command_router.gd", CommandRouter):
+		_test_requires_confirm(CommandRouter)
 
 	print("\n[godot headless tests] %d passed, %d failed" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
+
+
+func _require_loaded(rel_path: String, script: Script) -> bool:
+	if script != null:
+		return true
+	_fail += 1
+	print("FAIL %s: load() returned null — check the SCRIPT ERROR output above for a parse error." % rel_path)
+	return false
 
 
 ## test/godot/run_tests.gd -> test/godot -> test -> <repo root>
