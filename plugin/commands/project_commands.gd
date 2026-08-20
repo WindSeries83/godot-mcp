@@ -79,7 +79,7 @@ func get_command_schemas() -> Dictionary:
 				"value": {"type": "any", "required": true, "desc": "Coerced to the setting's existing type, or to 'type' if given"},
 				"type": {"type": "string", "required": false, "desc": "One of: string, string_name, int, float, bool, vector2, vector2i, vector3, vector3i, rect2, rect2i, color, array, dictionary, packed_*_array"},
 			},
-			"annotations": {"readOnly": false, "destructive": true, "idempotent": true},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": true, "confirm": true},
 		},
 		"uid_to_project_path": {
 			"category": "project",
@@ -100,13 +100,13 @@ func get_command_schemas() -> Dictionary:
 				"name": {"type": "string", "required": true},
 				"path": {"type": "string", "required": true, "desc": "res:// path to the script/scene; must already exist"},
 			},
-			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false, "confirm": true},
 		},
 		"remove_autoload": {
 			"category": "project",
 			"summary": "Unregister an autoload singleton and save project.godot.",
 			"params": {"name": {"type": "string", "required": true}},
-			"annotations": {"readOnly": false, "destructive": true, "idempotent": true},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": true, "confirm": true},
 		},
 		"classdb_describe": {
 			"category": "project",

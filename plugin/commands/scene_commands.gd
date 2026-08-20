@@ -45,7 +45,7 @@ func get_command_schemas() -> Dictionary:
 				"root_name": {"type": "string", "required": false, "default": "", "desc": "Defaults to the file's basename"},
 				"force": {"type": "bool", "required": false, "default": false, "desc": "Overwrite an existing file at path"},
 			},
-			"annotations": {"readOnly": false, "destructive": true, "idempotent": false},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false, "confirm": true},
 		},
 		"open_scene": {
 			"category": "scene",
@@ -57,7 +57,7 @@ func get_command_schemas() -> Dictionary:
 			"category": "scene",
 			"summary": "Delete a scene file (and its .import file, if any) from disk. Refuses non-scene paths and scenes currently open in the editor.",
 			"params": {"path": {"type": "string", "required": true, "desc": "res:// path to the scene file"}},
-			"annotations": {"readOnly": false, "destructive": true, "idempotent": true},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": true, "confirm": true},
 		},
 		"add_scene_instance": {
 			"category": "scene",
@@ -89,7 +89,7 @@ func get_command_schemas() -> Dictionary:
 			"params": {
 				"path": {"type": "string", "required": false, "default": "", "desc": "res:// path to save as; defaults to the scene's current path"},
 			},
-			"annotations": {"readOnly": false, "destructive": true, "idempotent": true},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": true, "confirm": true},
 		},
 		"get_scene_exports": {
 			"category": "scene",

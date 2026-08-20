@@ -447,6 +447,27 @@ func guard_text_resource_write(path: String, force: bool) -> Dictionary:
 	return {}
 
 
+## Refuses to overwrite a file that already exists at `path` unless `overwrite`
+## is true. `path` may be res://, user://, or an absolute filesystem path (see
+## resolve_save_path()) — shared by every command that writes a capture to a
+## caller-supplied path (screenshots, turntable sheets) instead of a path the
+## tool itself chose, where a typo'd path would otherwise silently clobber
+## something unrelated.
+func guard_overwrite(path: String, overwrite: bool) -> Dictionary:
+	if overwrite or path.is_empty():
+		return {}
+	var abs_path := resolve_save_path(path)
+	if not FileAccess.file_exists(abs_path):
+		return {}
+	return error_conflict(
+		"Refusing to overwrite existing file '%s'" % path,
+		{
+			"path": path,
+			"suggestion": "Pass overwrite=true to replace it deliberately, or choose a different save_path.",
+		}
+	)
+
+
 func mark_current_scene_unsaved() -> void:
 	if EditorInterface.has_method("mark_scene_as_unsaved"):
 		EditorInterface.mark_scene_as_unsaved()

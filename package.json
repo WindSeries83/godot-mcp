@@ -14,7 +14,9 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "vitest run",
-    "test:godot": "node scripts/run-godot-tests.mjs"
+    "test:godot": "node scripts/run-godot-tests.mjs",
+    "contract": "node scripts/contract-check.mjs",
+    "token-cost": "node scripts/token-cost.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.9.0"

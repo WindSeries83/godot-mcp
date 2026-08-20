@@ -88,7 +88,7 @@ func get_command_schemas() -> Dictionary:
 			"params": {
 				"code": {"type": "string", "required": true},
 			},
-			"annotations": {"readOnly": false, "destructive": true, "idempotent": false},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false, "confirm": true},
 		},
 		"start_recording": {
 			"category": "runtime",

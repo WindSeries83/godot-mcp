@@ -41,19 +41,21 @@ func get_command_schemas() -> Dictionary:
 		},
 		"get_editor_screenshot": {
 			"category": "editor",
-			"summary": "Captures the editor's main viewport as a PNG, returned as base64 or saved to disk.",
+			"summary": "Captures the editor's main viewport as a PNG, returned as base64 or saved to disk. Refuses to overwrite an existing file at save_path unless overwrite is set.",
 			"params": {
 				"save_path": {"type": "string", "required": false, "default": "", "desc": "If given, save PNG here (res://, user://, or absolute) instead of returning base64"},
+				"overwrite": {"type": "bool", "required": false, "default": false, "desc": "Overwrite an existing file at save_path"},
 			},
-			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
 		},
 		"get_game_screenshot": {
 			"category": "editor",
-			"summary": "Captures a screenshot from the running game via file-based IPC. Requires a scene to be playing.",
+			"summary": "Captures a screenshot from the running game via file-based IPC. Requires a scene to be playing. Refuses to overwrite an existing file at save_path unless overwrite is set.",
 			"params": {
 				"save_path": {"type": "string", "required": false, "default": "", "desc": "If given, save PNG here (res://, user://, or absolute) instead of returning base64"},
+				"overwrite": {"type": "bool", "required": false, "default": false, "desc": "Overwrite an existing file at save_path"},
 			},
-			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
 		},
 		"execute_editor_script": {
 			"category": "editor",
@@ -62,7 +64,7 @@ func get_command_schemas() -> Dictionary:
 				"code": {"type": "string", "required": true, "desc": "GDScript source for a run() function body"},
 				"allow_unsafe_editor_io": {"type": "bool", "required": false, "default": false, "desc": "Bypass the unsafe file/resource-write pattern guard"},
 			},
-			"annotations": {"readOnly": false, "destructive": true, "idempotent": false},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false, "confirm": true},
 		},
 		"clear_output": {
 			"category": "editor",
@@ -360,6 +362,9 @@ func _get_editor_screenshot(params: Dictionary) -> Dictionary:
 
 	var save_path: String = params.get("save_path", "")
 	if save_path != "":
+		var overwrite_guard := guard_overwrite(save_path, optional_bool(params, "overwrite"))
+		if overwrite_guard.has("error"):
+			return overwrite_guard
 		var abs_path := resolve_save_path(save_path)
 		var err := image.save_png(abs_path)
 		if err != OK:
@@ -430,6 +435,9 @@ func _get_game_screenshot(params: Dictionary) -> Dictionary:
 
 	var save_path_param: String = params.get("save_path", "")
 	if save_path_param != "":
+		var overwrite_guard := guard_overwrite(save_path_param, optional_bool(params, "overwrite"))
+		if overwrite_guard.has("error"):
+			return overwrite_guard
 		var abs_path := resolve_save_path(save_path_param)
 		var save_err := image.save_png(abs_path)
 		if save_err != OK:

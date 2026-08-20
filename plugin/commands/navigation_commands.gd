@@ -195,8 +195,16 @@ func _bake_navigation_mesh(params: Dictionary) -> Dictionary:
 		var region: NavigationRegion3D = node as NavigationRegion3D
 		if region.navigation_mesh == null:
 			return error_invalid_params("NavigationRegion3D has no NavigationMesh resource")
+		# bake_navigation_mesh() mutates region.navigation_mesh in place, so
+		# baking into a duplicate first — then swapping it in through
+		# set_property_with_undo — is what makes the whole bake a single
+		# undoable step instead of an untracked resource mutation.
+		var old_mesh: NavigationMesh = region.navigation_mesh
+		var new_mesh: NavigationMesh = old_mesh.duplicate() as NavigationMesh
+		region.navigation_mesh = new_mesh
 		region.bake_navigation_mesh()
-		mark_current_scene_unsaved()
+		region.navigation_mesh = old_mesh
+		set_property_with_undo(region, "navigation_mesh", new_mesh, "MCP: Bake NavigationMesh")
 		return success({
 			"node_path": node_path,
 			"type": "NavigationRegion3D",
@@ -205,9 +213,8 @@ func _bake_navigation_mesh(params: Dictionary) -> Dictionary:
 
 	elif node is NavigationRegion2D:
 		var region: NavigationRegion2D = node as NavigationRegion2D
-		if region.navigation_polygon == null:
-			var nav_poly := NavigationPolygon.new()
-			region.navigation_polygon = nav_poly
+		var old_poly: NavigationPolygon = region.navigation_polygon
+		var new_poly: NavigationPolygon = (old_poly.duplicate() as NavigationPolygon) if old_poly != null else NavigationPolygon.new()
 
 		# Set outline vertices from params
 		if params.has("outline"):
@@ -221,11 +228,11 @@ func _bake_navigation_mesh(params: Dictionary) -> Dictionary:
 
 			if outline.size() >= 3:
 				# Clear existing outlines
-				while region.navigation_polygon.get_outline_count() > 0:
-					region.navigation_polygon.remove_outline(0)
-				region.navigation_polygon.add_outline(outline)
-				region.navigation_polygon.make_polygons_from_outlines()
-				mark_current_scene_unsaved()
+				while new_poly.get_outline_count() > 0:
+					new_poly.remove_outline(0)
+				new_poly.add_outline(outline)
+				new_poly.make_polygons_from_outlines()
+				set_property_with_undo(region, "navigation_polygon", new_poly, "MCP: Update NavigationPolygon outline")
 				return success({
 					"node_path": node_path,
 					"type": "NavigationRegion2D",
@@ -235,9 +242,12 @@ func _bake_navigation_mesh(params: Dictionary) -> Dictionary:
 			else:
 				return error_invalid_params("Outline must have at least 3 vertices")
 		else:
-			# Try baking from source geometry
+			# Try baking from source geometry — same duplicate-then-swap
+			# reasoning as the NavigationRegion3D branch above.
+			region.navigation_polygon = new_poly
 			region.bake_navigation_polygon()
-			mark_current_scene_unsaved()
+			region.navigation_polygon = old_poly
+			set_property_with_undo(region, "navigation_polygon", new_poly, "MCP: Bake NavigationPolygon")
 			return success({
 				"node_path": node_path,
 				"type": "NavigationRegion2D",

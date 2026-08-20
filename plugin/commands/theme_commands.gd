@@ -23,7 +23,7 @@ func get_command_schemas() -> Dictionary:
 				"path": {"type": "string", "required": true, "desc": "res:// destination path"},
 				"default_font_size": {"type": "int", "required": false, "default": 0, "desc": "Theme's default_font_size; left unset (engine default) when 0 or less"},
 			},
-			"annotations": {"readOnly": false, "destructive": true, "idempotent": false},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false, "confirm": true},
 		},
 		"set_theme_color": {
 			"category": "theme",

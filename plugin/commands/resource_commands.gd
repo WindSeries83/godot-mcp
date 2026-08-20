@@ -32,7 +32,7 @@ func get_command_schemas() -> Dictionary:
 				"path": {"type": "string", "required": true, "desc": "res:// path to the resource file"},
 				"properties": {"type": "object", "required": true, "desc": "Property name/value pairs to set"},
 			},
-			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": true, "confirm": true},
 		},
 		"create_resource": {
 			"category": "resource",
@@ -43,7 +43,7 @@ func get_command_schemas() -> Dictionary:
 				"overwrite": {"type": "bool", "required": false, "default": false, "desc": "Overwrite an existing file at path"},
 				"properties": {"type": "object", "required": false, "default": {}, "desc": "Initial property name/value pairs to set on the new resource"},
 			},
-			"annotations": {"readOnly": false, "destructive": true, "idempotent": false},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false, "confirm": true},
 		},
 		"get_resource_preview": {
 			"category": "resource",

@@ -41,7 +41,7 @@ func get_command_schemas() -> Dictionary:
 				"class_name": {"type": "string", "required": false, "default": "", "desc": "class_name line for the generated template"},
 				"force": {"type": "bool", "required": false, "default": false, "desc": "Overwrite an existing file at path"},
 			},
-			"annotations": {"readOnly": false, "destructive": true, "idempotent": false},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false, "confirm": true},
 		},
 		"edit_script": {
 			"category": "script",
@@ -56,7 +56,7 @@ func get_command_schemas() -> Dictionary:
 				"text": {"type": "string", "required": false, "desc": "Text to insert at insert_at_line"},
 				"force": {"type": "bool", "required": false, "default": false, "desc": "Bypass the offline text-resource write guard"},
 			},
-			"annotations": {"readOnly": false, "destructive": true, "idempotent": true},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": true, "confirm": true},
 		},
 		"attach_script": {
 			"category": "script",

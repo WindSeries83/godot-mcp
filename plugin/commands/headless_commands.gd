@@ -59,7 +59,7 @@ func get_command_schemas() -> Dictionary:
 				"quit_after_frames": {"type": "int", "required": false, "default": 0, "desc": "If > 0, passed as --quit-after"},
 				"args": {"type": "array", "required": false, "default": [], "desc": "Extra arguments appended after '--', forwarded to the project"},
 			},
-			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false, "confirm": true},
 		},
 		"run_headless_script": {
 			"category": "headless",
@@ -70,7 +70,7 @@ func get_command_schemas() -> Dictionary:
 				"quit_after_frames": {"type": "int", "required": false, "default": 0, "desc": "If > 0, passed as --quit-after"},
 				"args": {"type": "array", "required": false, "default": [], "desc": "Extra arguments appended after '--', forwarded to the project"},
 			},
-			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false, "confirm": true},
 		},
 		"get_godot_executable": {
 			"category": "headless",

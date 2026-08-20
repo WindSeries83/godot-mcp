@@ -165,7 +165,7 @@ func get_command_schemas() -> Dictionary:
 		},
 		"turntable_screenshot": {
 			"category": "3d",
-			"summary": "Orbits the 3D editor camera around a node's world-space bounds, capturing one view per angle, and composites them into a single contact-sheet PNG. Restores the original camera position/FOV afterward. Does not work under --headless (same limitation as get_editor_screenshot).",
+			"summary": "Orbits the 3D editor camera around a node's world-space bounds, capturing one view per angle, and composites them into a single contact-sheet PNG. Restores the original camera position/FOV afterward. Does not work under --headless (same limitation as get_editor_screenshot). Refuses to overwrite an existing file at save_path unless overwrite is set.",
 			"params": {
 				"node_path": {"type": "string", "required": false, "default": ".", "desc": "Scene-relative path to the Node3D to frame"},
 				"views": {"type": "int", "required": false, "default": 4, "desc": "Number of evenly-spaced angles around the node, clamped 1-12"},
@@ -173,8 +173,9 @@ func get_command_schemas() -> Dictionary:
 				"padding": {"type": "float", "required": false, "default": 1.4, "desc": "Framing margin multiplier around the bounds, clamped 1.0-5.0"},
 				"thumb_size": {"type": "int", "required": false, "default": 384, "desc": "Width/height in pixels of each view before tiling, clamped 64-1024"},
 				"save_path": {"type": "string", "required": false, "default": "", "desc": "If given, save the composed sheet here (res://, user://, or absolute) instead of returning base64"},
+				"overwrite": {"type": "bool", "required": false, "default": false, "desc": "Overwrite an existing file at save_path"},
 			},
-			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
 		},
 		"snap_to_ground": {
 			"category": "3d",
@@ -312,16 +313,6 @@ func _parse_vector3_param(params: Dictionary, key: String, default: Vector3) -> 
 	return default
 
 
-func _add_child_with_undo(node: Node, parent: Node, root: Node, action_name: String) -> void:
-	var undo_redo := get_undo_redo()
-	undo_redo.create_action(action_name)
-	undo_redo.add_do_method(parent, "add_child", node)
-	undo_redo.add_do_method(node, "set_owner", root)
-	undo_redo.add_do_reference(node)
-	undo_redo.add_undo_method(parent, "remove_child", node)
-	undo_redo.commit_action()
-
-
 ## ─── 1. add_mesh_instance ──────────────────────────────────────────────────
 
 func _add_mesh_instance(params: Dictionary) -> Dictionary:
@@ -405,7 +396,7 @@ func _add_mesh_instance(params: Dictionary) -> Dictionary:
 	mesh_instance.rotation_degrees = rotation_deg
 	mesh_instance.scale = scale_vec
 
-	_add_child_with_undo(mesh_instance, parent, root, "MCP: Add MeshInstance3D")
+	add_child_with_undo(parent, mesh_instance, root, "MCP: Add MeshInstance3D")
 
 	return success({
 		"node_path": str(root.get_path_to(mesh_instance)),
@@ -507,7 +498,7 @@ func _setup_lighting(params: Dictionary) -> Dictionary:
 	if params.has("rotation"):
 		light.rotation_degrees = _parse_vector3_param(params, "rotation", light.rotation_degrees)
 
-	_add_child_with_undo(light, parent, root, "MCP: Add %s" % light_type)
+	add_child_with_undo(parent, light, root, "MCP: Add %s" % light_type)
 
 	return success({
 		"node_path": str(root.get_path_to(light)),
@@ -648,9 +639,12 @@ func _setup_environment(params: Dictionary) -> Dictionary:
 		world_env = WorldEnvironment.new()
 		world_env.name = node_name
 
-	var env: Environment = world_env.environment
-	if env == null:
-		env = Environment.new()
+	# Duplicate rather than mutate world_env.environment in place: an
+	# in-place mutation would leave the "old" value indistinguishable from
+	# the "new" one by the time set_property_with_undo captures it below,
+	# since both would already point at the same, already-mutated resource.
+	var old_env: Environment = world_env.environment
+	var env: Environment = old_env.duplicate() as Environment if old_env != null else Environment.new()
 
 	# Background / Sky
 	var bg_mode: String = optional_string(params, "background_mode", "sky")
@@ -751,10 +745,11 @@ func _setup_environment(params: Dictionary) -> Dictionary:
 	if params.has("sdfgi_enabled"):
 		env.sdfgi_enabled = optional_bool(params, "sdfgi_enabled", false)
 
-	world_env.environment = env
-
-	if not is_existing:
-		_add_child_with_undo(world_env, parent, root, "MCP: Add WorldEnvironment")
+	if is_existing:
+		set_property_with_undo(world_env, "environment", env, "MCP: Update Environment")
+	else:
+		world_env.environment = env
+		add_child_with_undo(parent, world_env, root, "MCP: Add WorldEnvironment")
 
 	var features: Array = []
 	if env.fog_enabled: features.append("fog")
@@ -801,6 +796,16 @@ func _setup_camera_3d(params: Dictionary) -> Dictionary:
 		camera = Camera3D.new()
 		camera.name = optional_string(params, "name", "Camera3D")
 
+	# Snapshot before mutating an existing camera, so every touched property
+	# can be wrapped in one undo action below — mutating it directly (as this
+	# function does, to keep the match/if logic simple) would otherwise leave
+	# no record for EditorUndoRedoManager to revert.
+	var camera_undo_props: Array[String] = ["projection", "fov", "size", "near", "far", "cull_mask", "current", "position", "rotation_degrees", "environment"]
+	var old_camera_values: Dictionary = {}
+	if is_existing:
+		for prop: String in camera_undo_props:
+			old_camera_values[prop] = camera.get(prop)
+
 	# Projection
 	var projection_str: String = optional_string(params, "projection", "")
 	if not projection_str.is_empty():
@@ -844,8 +849,15 @@ func _setup_camera_3d(params: Dictionary) -> Dictionary:
 			if env_res is Environment:
 				camera.environment = env_res as Environment
 
-	if not is_existing:
-		_add_child_with_undo(camera, parent, root, "MCP: Add Camera3D")
+	if is_existing:
+		var undo_redo := get_undo_redo()
+		undo_redo.create_action("MCP: Update Camera3D")
+		for prop: String in camera_undo_props:
+			undo_redo.add_do_property(camera, prop, camera.get(prop))
+			undo_redo.add_undo_property(camera, prop, old_camera_values[prop])
+		undo_redo.commit_action()
+	else:
+		add_child_with_undo(parent, camera, root, "MCP: Add Camera3D")
 
 	return success({
 		"node_path": str(root.get_path_to(camera)),
@@ -888,6 +900,14 @@ func _add_gridmap(params: Dictionary) -> Dictionary:
 		gridmap = GridMap.new()
 		gridmap.name = node_name
 
+	# Snapshot before mutating an existing gridmap, so the scalar properties
+	# touched below can be wrapped in the same undo action as the cell edits.
+	var gridmap_undo_props: Array[String] = ["mesh_library", "cell_size", "position"]
+	var old_gridmap_values: Dictionary = {}
+	if is_existing:
+		for prop: String in gridmap_undo_props:
+			old_gridmap_values[prop] = gridmap.get(prop)
+
 	# Mesh library
 	if params.has("mesh_library_path"):
 		var lib_path: String = params["mesh_library_path"]
@@ -910,12 +930,13 @@ func _add_gridmap(params: Dictionary) -> Dictionary:
 	# Position
 	gridmap.position = _parse_vector3_param(params, "position", gridmap.position if is_existing else Vector3.ZERO)
 
-	if not is_existing:
-		_add_child_with_undo(gridmap, parent, root, "MCP: Add GridMap")
-
-	# Set cells
+	# Set cells — capture the previous item/orientation at each touched
+	# coordinate first so the change can be undone cell-by-cell, mirroring
+	# tilemap_commands.gd's _capture_cell / _add_do_set_cells pattern.
 	var cells: Array = params.get("cells", [])
 	var cells_set: int = 0
+	var old_cell_states: Array = []
+	var new_cell_states: Array = []
 	for cell in cells:
 		if cell is Dictionary:
 			var x: int = int(cell.get("x", 0))
@@ -923,8 +944,30 @@ func _add_gridmap(params: Dictionary) -> Dictionary:
 			var z: int = int(cell.get("z", 0))
 			var item: int = int(cell.get("item", 0))
 			var orientation: int = int(cell.get("orientation", 0))
-			gridmap.set_cell_item(Vector3i(x, y, z), item, orientation)
+			var coords := Vector3i(x, y, z)
+			old_cell_states.append({
+				"coords": coords,
+				"item": gridmap.get_cell_item(coords),
+				"orientation": gridmap.get_cell_item_orientation(coords),
+			})
+			new_cell_states.append({"coords": coords, "item": item, "orientation": orientation})
 			cells_set += 1
+
+	if is_existing:
+		var undo_redo := get_undo_redo()
+		undo_redo.create_action("MCP: Update GridMap")
+		for prop: String in gridmap_undo_props:
+			undo_redo.add_do_property(gridmap, prop, gridmap.get(prop))
+			undo_redo.add_undo_property(gridmap, prop, old_gridmap_values[prop])
+		for state: Dictionary in new_cell_states:
+			undo_redo.add_do_method(gridmap, "set_cell_item", state["coords"], state["item"], state["orientation"])
+		for state: Dictionary in old_cell_states:
+			undo_redo.add_undo_method(gridmap, "set_cell_item", state["coords"], state["item"], state["orientation"])
+		undo_redo.commit_action()
+	else:
+		add_child_with_undo(parent, gridmap, root, "MCP: Add GridMap")
+		for state: Dictionary in new_cell_states:
+			gridmap.set_cell_item(state["coords"], state["item"], state["orientation"])
 
 	return success({
 		"node_path": str(root.get_path_to(gridmap)),
@@ -1094,6 +1137,9 @@ func _turntable_screenshot(params: Dictionary) -> Dictionary:
 
 	var save_path: String = optional_string(params, "save_path", "")
 	if not save_path.is_empty():
+		var overwrite_guard := guard_overwrite(save_path, optional_bool(params, "overwrite"))
+		if overwrite_guard.has("error"):
+			return overwrite_guard
 		var abs_path := resolve_save_path(save_path)
 		var err := sheet.save_png(abs_path)
 		if err != OK:
@@ -1427,7 +1473,7 @@ func _add_csg_shape(params: Dictionary) -> Dictionary:
 	shape.position = _parse_vector3_param(params, "position", Vector3.ZERO)
 	shape.rotation_degrees = _parse_vector3_param(params, "rotation", Vector3.ZERO)
 
-	_add_child_with_undo(shape, parent, root, "MCP: Add CSG %s" % shape_kind.capitalize())
+	add_child_with_undo(parent, shape, root, "MCP: Add CSG %s" % shape_kind.capitalize())
 
 	return success({
 		"node_path": str(root.get_path_to(shape)),
@@ -1506,7 +1552,7 @@ func _add_multimesh_scatter(params: Dictionary) -> Dictionary:
 	mmi.multimesh = multimesh
 	mmi.name = optional_string(params, "name", "MultiMeshInstance3D")
 
-	_add_child_with_undo(mmi, parent, root, "MCP: Add MultiMesh Scatter")
+	add_child_with_undo(parent, mmi, root, "MCP: Add MultiMesh Scatter")
 
 	return success({
 		"node_path": str(root.get_path_to(mmi)),
@@ -1547,7 +1593,7 @@ func _add_path3d(params: Dictionary) -> Dictionary:
 	path3d.curve = curve
 	path3d.name = optional_string(params, "name", "Path3D")
 
-	_add_child_with_undo(path3d, parent, root, "MCP: Add Path3D")
+	add_child_with_undo(parent, path3d, root, "MCP: Add Path3D")
 
 	var add_follower: bool = optional_bool(params, "add_path_follow", false)
 	var follow_path_str := ""

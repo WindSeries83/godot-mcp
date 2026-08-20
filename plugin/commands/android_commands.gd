@@ -38,7 +38,7 @@ func get_command_schemas() -> Dictionary:
 				"launch": {"type": "bool", "required": false, "default": true, "desc": "Launch the app's main activity after install"},
 				"skip_export": {"type": "bool", "required": false, "default": false, "desc": "Skip the export step and install the APK already at the preset's export path"},
 			},
-			"annotations": {"readOnly": false, "destructive": true, "idempotent": false},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false, "confirm": true},
 		},
 	}
 

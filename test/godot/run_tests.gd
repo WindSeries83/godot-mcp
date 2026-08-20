@@ -21,9 +21,12 @@ func _init() -> void:
 	var repo_root := _find_repo_root()
 	var PropertyParser: Script = load(repo_root.path_join("plugin/utils/property_parser.gd"))
 	var BaseCommand: Script = load(repo_root.path_join("plugin/commands/base_command.gd"))
+	var CommandRouter: Script = load(repo_root.path_join("plugin/command_router.gd"))
 
 	_test_property_parser(PropertyParser)
 	_test_is_safe_scene_path(BaseCommand)
+	_test_requires_confirm(CommandRouter)
+	_test_guard_overwrite(BaseCommand)
 
 	print("\n[godot headless tests] %d passed, %d failed" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
@@ -115,3 +118,75 @@ func _test_is_safe_scene_path(BaseCommand: Script) -> void:
 	# ever reaches this guard — the guard itself treats a bare "." segment as
 	# unsafe, which is intentional (it also rejects "a/./b").
 	_check("bare '.' is rejected by the guard itself", BaseCommand.is_safe_scene_path("."), false)
+
+
+func _test_requires_confirm(CommandRouter: Script) -> void:
+	var gated_schema := {"annotations": {"destructive": true, "confirm": true}}
+	var ungated_schema := {"annotations": {"destructive": true, "confirm": false}}
+	var no_annotations_schema := {}
+
+	_check(
+		"gated method without confirm:true in params requires confirmation",
+		CommandRouter._requires_confirm(gated_schema, {}),
+		true
+	)
+	_check(
+		"gated method with confirm:true in params does not require confirmation",
+		CommandRouter._requires_confirm(gated_schema, {"confirm": true}),
+		false
+	)
+	_check(
+		"gated method with confirm:false in params still requires confirmation",
+		CommandRouter._requires_confirm(gated_schema, {"confirm": false}),
+		true
+	)
+	_check(
+		"non-gated method never requires confirmation",
+		CommandRouter._requires_confirm(ungated_schema, {}),
+		false
+	)
+	_check(
+		"a method with no schema at all never requires confirmation",
+		CommandRouter._requires_confirm(no_annotations_schema, {}),
+		false
+	)
+
+
+func _test_guard_overwrite(BaseCommand: Script) -> void:
+	var cmd: Object = BaseCommand.new()
+
+	_check(
+		"empty path never blocks",
+		cmd.guard_overwrite("", false).has("error"),
+		false
+	)
+	_check(
+		"a path that doesn't exist on disk never blocks",
+		cmd.guard_overwrite("user://mcp_contract_test_definitely_missing.png", false).has("error"),
+		false
+	)
+	_check(
+		"overwrite:true always bypasses the guard, existing file or not",
+		cmd.guard_overwrite("user://mcp_contract_test_definitely_missing.png", true).has("error"),
+		false
+	)
+
+	var existing_path := "user://mcp_contract_test_existing.tmp"
+	var abs_path := ProjectSettings.globalize_path(existing_path)
+	var f := FileAccess.open(abs_path, FileAccess.WRITE)
+	f.store_string("x")
+	f.close()
+
+	_check(
+		"an existing file without overwrite:true is blocked",
+		cmd.guard_overwrite(existing_path, false).has("error"),
+		true
+	)
+	_check(
+		"an existing file with overwrite:true is allowed",
+		cmd.guard_overwrite(existing_path, true).has("error"),
+		false
+	)
+
+	DirAccess.remove_absolute(abs_path)
+	cmd.free()

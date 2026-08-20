@@ -50,3 +50,42 @@ and retrying it every few seconds until a token is supplied).
 This is a shared-secret gate, not a full security boundary. Do not rely on it
 against same-user processes, and never connect the plugin to a non-loopback
 interface.
+
+# Security — Confirmation gate on irreversible writes
+
+Separately from the connection token above, every method whose schema marks
+`annotations.confirm: true` is rejected by `command_router.gd`'s `execute()`
+with error code `-32009` unless the call's `params` includes `confirm: true`.
+This covers methods that write or delete a file on disk, modify
+`project.godot`, or run arbitrary code in the editor/game process — roughly
+20 of the addon's ~190 methods, e.g. `create_scene`, `delete_scene`,
+`edit_script`, `create_resource`, `execute_editor_script`,
+`set_project_setting`, `run_headless_scene`.
+
+## What it protects against
+
+- An AI assistant silently overwriting or deleting a file, or running
+  arbitrary code, as a side effect of a call it didn't fully explain to the
+  operator before making it.
+- The specific class of write that **cannot** be undone with Ctrl-Z: unlike
+  edits to the currently open scene (which go through
+  `EditorUndoRedoManager` and are always undoable), a file write/delete or a
+  `project.godot` change persists immediately and survives an editor restart.
+
+## What it deliberately does NOT cover
+
+- **Mutations to the edited scene** (`add_node`, `delete_node`,
+  `update_property`, CSG/scatter tools, etc.) are never gated, even though
+  several of them are marked `destructive: true`. `EditorUndoRedoManager`
+  already makes every one of them a single Ctrl-Z away from reverting, which
+  is a stronger and lower-friction guarantee than a confirmation flag would
+  add.
+- **Transient runtime input** (`simulate_key`, `simulate_mouse_click`,
+  `replay_recording`, …) is not gated either — these drive a running game
+  process via file IPC and confirming every keystroke would make them
+  unusable, without protecting anything that outlives the play session.
+- This is a **cooperative** gate: it relies on the calling MCP client (and
+  the assistant it drives) respecting the `-32009` refusal and the
+  `confirm: true` contract. A client that always retries with
+  `confirm: true` regardless of the refusal gets no protection from this
+  gate — same trust model as the connection token above.

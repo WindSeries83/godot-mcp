@@ -10,7 +10,7 @@ Pont MCP entre un assistant IA et l'éditeur Godot.
 Assistant IA <---stdio/MCP---> godot-mcp <---WebSocket:6505---> Plugin Godot
 ```
 
-**7 outils MCP** pour piloter l'éditeur : `godot_call` (toutes les méthodes de l'addon — le catalogue est découvert en direct, jamais figé dans ce dépôt), `godot_list_methods`, `godot_describe`, `godot_info`, `godot_screenshot`, `godot_execute`, `godot_status`.
+**9 outils MCP** pour piloter l'éditeur : `godot_call` (toutes les méthodes de l'addon — le catalogue est découvert en direct, jamais figé dans ce dépôt), `godot_list_methods`, `godot_describe`, `godot_info`, `godot_screenshot`, `godot_execute`, `godot_status`, `godot_doctor`, `godot_assets`. Cette surface tient en ~1200 tokens (mesuré par `npm run token-cost`) — bien moins que la plupart des serveurs MCP Godot, qui exposent chaque méthode de l'addon comme un tool séparé.
 
 ## Installation
 
@@ -58,8 +58,20 @@ Ajoutez à la config de votre client IA (`.mcp.json`, `claude.json`, `opencode.j
 | `godot_screenshot` | Capture éditeur en PNG |
 | `godot_execute` | Exécute du GDScript |
 | `godot_status` | Vérifie la connexion |
+| `godot_doctor` | Diagnostic complet : port, connexion, auth, contrat addon/serveur, binaire Godot |
 | `godot_assets` | Recherche/prévisualise/importe des assets CC0 (Poly Haven, ambientCG) |
 
+> **Confirmation obligatoire (`confirm: true`)** : les méthodes qui écrivent
+> ou suppriment un fichier sur disque, modifient `project.godot`, ou exécutent
+> du code arbitraire dans le process éditeur/jeu (`create_scene`,
+> `delete_scene`, `edit_script`, `execute_editor_script`, `set_project_setting`,
+> etc.) refusent l'appel avec l'erreur `-32009` tant que `params.confirm` n'est
+> pas `true`. `godot_describe` liste ce paramètre dans le schéma de chaque
+> méthode concernée. Les mutations de la **scène éditée** (ajout/suppression
+> de nodes, changement de propriétés, CSG, scatter…) ne sont **pas** gatées :
+> elles passent par `EditorUndoRedoManager` et un simple Ctrl-Z suffit à les
+> annuler.
+>
 > **`godot_assets`** effectue des requêtes réseau sortantes vers `polyhaven.com`
 > et `ambientcg.com`. `import` écrit les fichiers dans
 > `<projet>/assets/<provider>/<id>/` (chemin obtenu via `get_project_info`)
@@ -119,8 +131,10 @@ godot-mcp/
 ## Développement
 
 ```bash
-npm test          # tests unitaires (vitest) : framing WS, dispatch JSON-RPC
-npm run test:godot # tests GDScript en --headless (nécessite `godot`/`godot4` sur le PATH ou GODOT_BIN)
+npm test           # tests unitaires (vitest), y compris le contract-check addon/serveur
+npm run contract    # contract-check seul : get_commands()/get_command_schemas() alignés, modules enregistrés
+npm run test:godot  # tests GDScript en --headless (nécessite `godot`/`godot4` sur le PATH ou GODOT_BIN)
+npm run token-cost  # mesure le poids en tokens de la surface d'outils (et le contrefactuel si un éditeur est connecté)
 ```
 
 ## Licence
@@ -139,7 +153,7 @@ MCP bridge between an AI assistant and the Godot editor.
 AI Assistant <---stdio/MCP---> godot-mcp <---WebSocket:6505---> Godot Plugin
 ```
 
-**7 MCP tools** to control the editor: `godot_call` (every addon method — the catalog is discovered live, never hardcoded in this repo), `godot_list_methods`, `godot_describe`, `godot_info`, `godot_screenshot`, `godot_execute`, `godot_status`.
+**9 MCP tools** to control the editor: `godot_call` (every addon method — the catalog is discovered live, never hardcoded in this repo), `godot_list_methods`, `godot_describe`, `godot_info`, `godot_screenshot`, `godot_execute`, `godot_status`, `godot_doctor`, `godot_assets`. This surface weighs ~1200 tokens (measured by `npm run token-cost`) — far less than most Godot MCP servers, which expose every addon method as its own tool.
 
 ## Setup
 
@@ -187,8 +201,19 @@ Add to your AI client config (`.mcp.json`, `claude.json`, `opencode.json`):
 | `godot_screenshot` | Editor screenshot in PNG |
 | `godot_execute` | Run GDScript |
 | `godot_status` | Check connection |
+| `godot_doctor` | End-to-end diagnostic: port, connection, auth, addon/server contract, Godot binary |
 | `godot_assets` | Search/preview/import CC0 assets (Poly Haven, ambientCG) |
 
+> **Confirmation required (`confirm: true`)**: methods that write to or
+> delete a file on disk, modify `project.godot`, or run arbitrary code in the
+> editor/game process (`create_scene`, `delete_scene`, `edit_script`,
+> `execute_editor_script`, `set_project_setting`, etc.) refuse the call with a
+> `-32009` error until `params.confirm` is `true`. `godot_describe` lists this
+> parameter in the schema of every gated method. Mutations to the **edited
+> scene** (adding/removing nodes, property changes, CSG, scatter…) are **not**
+> gated: they go through `EditorUndoRedoManager`, so a plain Ctrl-Z undoes
+> them.
+>
 > **`godot_assets`** makes outbound network requests to `polyhaven.com` and
 > `ambientcg.com`. `import` writes files under
 > `<project>/assets/<provider>/<id>/` (path learned via `get_project_info`)
@@ -231,8 +256,10 @@ slow connection.
 ## Development
 
 ```bash
-npm test           # unit tests (vitest): WS framing, JSON-RPC dispatch
-npm run test:godot # headless GDScript tests (needs `godot`/`godot4` on PATH or GODOT_BIN)
+npm test           # unit tests (vitest), including the addon/server contract-check
+npm run contract    # contract-check alone: get_commands()/get_command_schemas() agree, every module registered
+npm run test:godot  # headless GDScript tests (needs `godot`/`godot4` on PATH or GODOT_BIN)
+npm run token-cost  # measures the tool surface's token weight (and the counterfactual if an editor is connected)
 ```
 
 ## Structure

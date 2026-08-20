@@ -134,6 +134,17 @@ func execute(method: String, params: Dictionary) -> Dictionary:
 			}
 		}
 
+	if _requires_confirm(_command_schemas.get(method, {}), params):
+		return {
+			"error": {
+				"code": -32009,
+				"message": "'%s' writes to disk (or another persistent target outside EditorUndoRedoManager) and requires explicit confirmation." % method,
+				"data": {
+					"suggestion": "Retry the same call with confirm: true in params once you've verified this is intended.",
+				}
+			}
+		}
+
 	var handler: Callable = _command_handlers[method]
 	# Not typed as Dictionary on assignment: a handler that returns something
 	# else would raise here, aborting the coroutine so no response is ever
@@ -150,6 +161,16 @@ func execute(method: String, params: Dictionary) -> Dictionary:
 			}
 		}
 	return result
+
+
+## True when `schema` marks its method annotations.confirm:true and `params`
+## doesn't carry confirm:true itself. Pure and static so it's testable from
+## GDScript headless test runners without an EditorPlugin/editor_plugin.
+static func _requires_confirm(schema: Dictionary, params: Dictionary) -> bool:
+	var annotations: Dictionary = schema.get("annotations", {})
+	if not annotations.get("confirm", false):
+		return false
+	return not (params.get("confirm", false) == true)
 
 
 func get_available_methods() -> Array:
@@ -187,9 +208,29 @@ func describe_method(method_names: Array) -> Dictionary:
 		if not _command_handlers.has(method_name):
 			out[method_name] = {"error": "Unknown method"}
 		elif _command_schemas.has(method_name):
-			out[method_name] = _command_schemas[method_name]
+			out[method_name] = _with_confirm_param(_command_schemas[method_name])
 		else:
 			out[method_name] = {"summary": "", "params": {}, "annotations": {}, "undocumented": true}
+	return out
+
+
+## Adds a synthetic "confirm" param to a schema's params when its own
+## annotations.confirm is true, so an agent calling godot_describe sees the
+## gate without any module having to hand-write this param itself (which
+## would drift the moment the module's annotations changed).
+func _with_confirm_param(schema: Dictionary) -> Dictionary:
+	var annotations: Dictionary = schema.get("annotations", {})
+	if not annotations.get("confirm", false):
+		return schema
+	var out: Dictionary = schema.duplicate(true)
+	var params: Dictionary = out.get("params", {}).duplicate(true)
+	params["confirm"] = {
+		"type": "bool",
+		"required": false,
+		"default": false,
+		"desc": "This method writes to disk (or another persistent target outside EditorUndoRedoManager) and is irreversible via Ctrl-Z. Pass true to proceed.",
+	}
+	out["params"] = params
 	return out
 
 

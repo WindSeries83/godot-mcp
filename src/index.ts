@@ -14,7 +14,9 @@ import http from "node:http";
 import crypto from "node:crypto";
 import { Duplex } from "node:stream";
 import { readFileSync } from "node:fs";
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { searchAssets, getAssetThumbnail, importAsset, type AssetProvider } from "./assets/index.js";
 
 const WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -133,6 +135,197 @@ export function decodeFrame(buf: Buffer): { opcode: number; payload: Buffer; tot
   return { opcode, payload, total: off + len };
 }
 
+// Method names src/index.ts calls directly by name (outside godot_call's
+// live-validated path) — kept in sync with scripts/contract-check.mjs's
+// TS_HARDCODED_METHODS. Duplicated rather than imported: contract-check.mjs
+// is a plain Node script run against the repo tree (including via npm test
+// and CI), while this file is compiled by tsc with rootDir "src" and would
+// need to reach outside it to import from scripts/.
+const DOCTOR_REQUIRED_METHODS = [
+  "describe_methods",
+  "describe_method",
+  "get_scene_tree",
+  "get_project_info",
+  "get_project_settings",
+  "get_output_log",
+  "classdb_describe",
+  "get_editor_screenshot",
+  "execute_editor_script",
+  "reload_project",
+];
+
+interface DoctorCheck {
+  ok: boolean;
+  label: string;
+  detail: string;
+  suggestion?: string;
+}
+
+function resolveGodotBinary(): { found: boolean; path?: string; version?: string } {
+  const candidates = [process.env.GODOT_BIN, "godot4", "godot"].filter(Boolean) as string[];
+  for (const candidate of candidates) {
+    try {
+      const result = spawnSync(candidate, ["--version"], { encoding: "utf8" });
+      if (result.status === 0) {
+        return { found: true, path: candidate, version: result.stdout.trim() };
+      }
+    } catch {
+      // candidate not on PATH / not executable — try the next one
+    }
+  }
+  return { found: false };
+}
+
+async function runDoctor(): Promise<DoctorCheck[]> {
+  const checks: DoctorCheck[] = [];
+
+  // 1. Port bound
+  const boundPort = godot.boundPort;
+  if (boundPort) {
+    checks.push({ ok: true, label: "Port bound", detail: `Listening on port ${boundPort}.` });
+  } else {
+    checks.push({
+      ok: false,
+      label: "Port bound",
+      detail: `No port bound — ${ALL_PORTS[0]}-${ALL_PORTS[ALL_PORTS.length - 1]} were all busy.`,
+      suggestion: "Close an unused agent session's godot-mcp process, or set GODOT_MCP_PORT to move this one.",
+    });
+  }
+
+  // 2. Editor connected
+  const peerCount = godot.connectedPeerCount;
+  if (peerCount === 1) {
+    checks.push({ ok: true, label: "Editor connected", detail: "One Godot editor is connected." });
+  } else if (peerCount > 1) {
+    checks.push({
+      ok: true,
+      label: "Editor connected",
+      detail: `${peerCount} Godot editors are connected — calls go to whichever answered first.`,
+      suggestion: "Close the editors you are not driving to avoid ambiguity.",
+    });
+  } else {
+    checks.push({
+      ok: false,
+      label: "Editor connected",
+      detail: "No Godot editor connected.",
+      suggestion: "Start Godot with the godot_mcp plugin enabled (Project Settings → Plugins → godot-mcp).",
+    });
+  }
+
+  // 3. Addon version vs server version (this checkout only — see below)
+  try {
+    const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+    const pkg = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8")) as { version?: string };
+    const pluginCfg = readFileSync(path.join(repoRoot, "plugin", "plugin.cfg"), "utf8");
+    const pluginVersionMatch = /version="([^"]+)"/.exec(pluginCfg);
+    const pluginVersion = pluginVersionMatch?.[1];
+    if (pkg.version && pluginVersion) {
+      if (pkg.version === pluginVersion) {
+        checks.push({
+          ok: true,
+          label: "Server/addon version match",
+          detail: `Both report ${pkg.version} in this checkout.`,
+        });
+      } else {
+        checks.push({
+          ok: false,
+          label: "Server/addon version match",
+          detail: `package.json is ${pkg.version} but plugin/plugin.cfg is ${pluginVersion} in this checkout.`,
+          suggestion: "One of the two wasn't bumped in the last release commit — check git history for the mismatch.",
+        });
+      }
+    } else {
+      checks.push({ ok: false, label: "Server/addon version match", detail: "Could not read one of the two version fields." });
+    }
+    checks.push({
+      ok: true,
+      label: "Addon freshness (informational)",
+      detail: "This only compares the files bundled with this server checkout, not the copy inside your Godot project's addons/godot_mcp/.",
+      suggestion: "After pulling an update, re-copy plugin/ over your project's addons/godot_mcp/ if you haven't already.",
+    });
+  } catch (err) {
+    checks.push({
+      ok: false,
+      label: "Server/addon version match",
+      detail: `Could not read package.json / plugin.cfg: ${(err as Error).message}`,
+    });
+  }
+
+  // 4. Auth token / require_connection_token agreement
+  const auth = godot.authStatus;
+  const hasToken = getAuthToken() != null;
+  if (!auth.required) {
+    checks.push({
+      ok: true,
+      label: "Auth",
+      detail: hasToken
+        ? "A token is configured, but the editor hasn't asked for one (godot_mcp/require_connection_token is off, or no editor has connected yet)."
+        : "No connection token required (godot_mcp/require_connection_token is off, or no editor has connected yet).",
+    });
+  } else if (auth.outcome === "ok") {
+    checks.push({ ok: true, label: "Auth", detail: "The editor required a token and accepted ours." });
+  } else if (auth.outcome === "no_token") {
+    checks.push({
+      ok: false,
+      label: "Auth",
+      detail: "The editor requires a connection token but none is configured on this server.",
+      suggestion: "Set GODOT_MCP_TOKEN (the literal token) or GODOT_MCP_TOKEN_PATH (path to the token file, printed in the editor Output panel). See SECURITY.md.",
+    });
+  } else if (auth.outcome === "rejected") {
+    checks.push({
+      ok: false,
+      label: "Auth",
+      detail: "The editor required a token and rejected the one this server sent.",
+      suggestion: "The configured token is stale or wrong — check GODOT_MCP_TOKEN(_PATH) against the editor's current token.",
+    });
+  } else {
+    checks.push({ ok: false, label: "Auth", detail: "The editor requires a token but no auth attempt has completed yet." });
+  }
+
+  // 5. Live contract: methods this server calls by name must exist on the addon side
+  if (peerCount > 0) {
+    try {
+      const known = await godot.listAllMethods();
+      const missing = DOCTOR_REQUIRED_METHODS.filter((m) => !(m in known));
+      if (missing.length === 0) {
+        checks.push({ ok: true, label: "Live method contract", detail: "All methods this server depends on by name are registered." });
+      } else {
+        checks.push({
+          ok: false,
+          label: "Live method contract",
+          detail: `The connected editor's addon is missing: ${missing.join(", ")}.`,
+          suggestion: "The addon copy in your project is out of date — re-copy plugin/ over addons/godot_mcp/ and reload the project.",
+        });
+      }
+      const undocumented = Object.values(known).filter((m) => !m.has_schema).length;
+      checks.push({
+        ok: true,
+        label: "Method schema coverage",
+        detail: `${Object.keys(known).length} methods registered, ${undocumented} without a schema.`,
+      });
+    } catch (err) {
+      checks.push({ ok: false, label: "Live method contract", detail: `Could not query the editor: ${(err as Error).message}` });
+    }
+  } else {
+    checks.push({ ok: false, label: "Live method contract", detail: "Skipped — no editor connected." });
+  }
+
+  // 6. Godot binary resolvable, for npm run test:godot
+  const bin = resolveGodotBinary();
+  if (bin.found) {
+    checks.push({ ok: true, label: "Godot binary (for test:godot)", detail: `Found ${bin.path}: ${bin.version}.` });
+  } else {
+    checks.push({
+      ok: false,
+      label: "Godot binary (for test:godot)",
+      detail: "No Godot binary found on PATH as 'godot4' or 'godot', and GODOT_BIN is unset.",
+      suggestion: "Set GODOT_BIN to a Godot 4 executable if you want to run npm run test:godot locally.",
+    });
+  }
+
+  return checks;
+}
+
 export class GodotBridge {
   private server: http.Server | null = null;
   private port = 0;
@@ -141,6 +334,24 @@ export class GodotBridge {
   private pending = new Map<number, Pending>();
   private authPending = new Set<number>();
   private nextId = 1;
+
+  // Auth outcome tracking for godot_doctor — previously an auth mismatch
+  // (server has no token configured, or the editor rejected the one it got)
+  // was only ever logged to stderr and never surfaced to a tool caller.
+  private authRequired = false;
+  private authOutcome: "ok" | "no_token" | "rejected" | null = null;
+
+  get authStatus(): { required: boolean; outcome: "ok" | "no_token" | "rejected" | null } {
+    return { required: this.authRequired, outcome: this.authOutcome };
+  }
+
+  get boundPort(): number {
+    return this.port;
+  }
+
+  get connectedPeerCount(): number {
+    return this.peers.size;
+  }
 
   // The addon is the source of truth for its own method schemas (see
   // command_router.gd describe_methods/describe_method) — these caches just
@@ -312,8 +523,10 @@ export class GodotBridge {
       // Sent when godot_mcp/require_connection_token is on. Previously
       // ignored entirely, so Godot closed the peer after its AUTH_TIMEOUT and
       // the bridge reconnect-looped forever with no working tools.
+      this.authRequired = true;
       const token = getAuthToken();
       if (!token) {
+        this.authOutcome = "no_token";
         console.error(
           "godot-mcp: the Godot editor requires a connection token but none is configured. " +
           "Set GODOT_MCP_TOKEN (the literal token) or GODOT_MCP_TOKEN_PATH (path to the token " +
@@ -332,7 +545,10 @@ export class GodotBridge {
     if (typeof msg.id === "number" && this.authPending.has(msg.id)) {
       this.authPending.delete(msg.id);
       if (msg.error) {
+        this.authOutcome = "rejected";
         console.error(`godot-mcp: auth rejected by editor: ${JSON.stringify(msg.error)}`);
+      } else {
+        this.authOutcome = "ok";
       }
       return;
     }
@@ -354,7 +570,7 @@ export const server = new Server(
   { capabilities: { tools: {}, resources: {}, prompts: {} } },
 );
 
-const TOOL_DEFS = [
+export const TOOL_DEFS = [
   {
     name: "godot_call",
     description:
@@ -426,6 +642,12 @@ const TOOL_DEFS = [
   {
     name: "godot_status",
     description: "Check connection status to the Godot editor.",
+    inputSchema: { type: "object", properties: {} },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: "godot_doctor",
+    description: "Diagnose the MCP bridge end-to-end (port, editor connection, auth, addon/server contract, Godot binary for headless tests) with a checklist and fix suggestions for anything failing.",
     inputSchema: { type: "object", properties: {} },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
@@ -739,6 +961,18 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
       case "godot_status": {
         return { content: [{ type: "text", text: godot.status }] };
+      }
+      case "godot_doctor": {
+        const checks = await runDoctor();
+        const lines = checks.map((c) => {
+          const mark = c.ok ? "✅" : "❌";
+          let line = `${mark} ${c.label}: ${c.detail}`;
+          if (c.suggestion) line += `\n   → ${c.suggestion}`;
+          return line;
+        });
+        const failCount = checks.filter((c) => !c.ok).length;
+        const summary = failCount === 0 ? "All checks passed." : `${failCount} check(s) need attention.`;
+        return { content: [{ type: "text", text: `${summary}\n\n${lines.join("\n")}` }] };
       }
       case "godot_assets": {
         const action = args?.action as string;

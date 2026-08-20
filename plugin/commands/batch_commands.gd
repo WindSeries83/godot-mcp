@@ -83,7 +83,7 @@ func get_command_schemas() -> Dictionary:
 				"force": {"type": "bool", "required": false, "default": false, "desc": "Required (together with dry_run=false) to actually write changes"},
 				"dry_run": {"type": "bool", "required": false, "default": true, "desc": "Report affected scenes/nodes without writing; defaults to the inverse of force"},
 			},
-			"annotations": {"readOnly": false, "destructive": true, "idempotent": true},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": true, "confirm": true},
 		},
 	}
 

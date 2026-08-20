@@ -24,7 +24,7 @@ func get_command_schemas() -> Dictionary:
 				"shader_type": {"type": "string", "required": false, "default": "spatial", "desc": "One of: spatial, canvas_item, particles, sky; picks the boilerplate when content is empty"},
 				"force": {"type": "bool", "required": false, "default": false, "desc": "Overwrite an existing file at path"},
 			},
-			"annotations": {"readOnly": false, "destructive": true, "idempotent": false},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false, "confirm": true},
 		},
 		"read_shader": {
 			"category": "shader",
@@ -43,7 +43,7 @@ func get_command_schemas() -> Dictionary:
 				"content": {"type": "string", "required": false, "desc": "Full replacement source; if given, replacements is ignored"},
 				"replacements": {"type": "array", "required": false, "desc": "List of {search, replace} string pairs applied to the current content"},
 			},
-			"annotations": {"readOnly": false, "destructive": true, "idempotent": true},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": true, "confirm": true},
 		},
 		"assign_shader_material": {
 			"category": "shader",
@@ -271,7 +271,12 @@ func _set_shader_param(params: Dictionary) -> Dictionary:
 			if parsed != null:
 				value = parsed
 
-	material.set_shader_parameter(param_name, value)
+	var old_value = material.get_shader_parameter(param_name)
+	var undo_redo := get_undo_redo()
+	undo_redo.create_action("MCP: Set shader param %s" % param_name)
+	undo_redo.add_do_method(material, "set_shader_parameter", param_name, value)
+	undo_redo.add_undo_method(material, "set_shader_parameter", param_name, old_value)
+	undo_redo.commit_action()
 
 	return success({"node_path": node_path, "param": param_name, "value": str(value)})
 
