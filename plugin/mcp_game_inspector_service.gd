@@ -5,7 +5,7 @@ extends Node
 const REQUEST_PATH := "user://mcp_game_request"
 const RESPONSE_PATH := "user://mcp_game_response"
 
-enum State { IDLE, CAPTURING_FRAMES, MONITORING, RECORDING, MOVING_TO, WATCHING_SIGNALS }
+enum State { IDLE, CAPTURING_FRAMES, MONITORING, RECORDING, MOVING_TO, WATCHING_SIGNALS, STEPPING, WAITING_CONDITION }
 
 var _state := State.IDLE
 var _pending_command: bool = false  # Crash recovery flag
@@ -44,6 +44,18 @@ var _watch_connections: Array = []  # Array of {node, signal, callable} for clea
 # Determinism / snapshot state
 var _snapshots: Dictionary = {}  # name -> {node_path: {prop: value}}
 
+# Frame-stepping state
+var _step_frames_remaining: int = 0
+var _step_physics: bool = true
+var _step_resume_after: bool = false
+
+# Conditional-wait state
+var _wait_condition_script: GDScript = null
+var _wait_condition_start_msec: int = 0
+var _wait_condition_timeout_msec: int = 0
+var _wait_condition_poll_interval_msec: int = 100
+var _wait_condition_next_poll_msec: int = 0
+
 # Move-to state
 var _moveto_target: Vector3 = Vector3.ZERO
 var _moveto_player: Node3D = null
@@ -62,6 +74,7 @@ func _ready() -> void:
 	if not OS.has_feature("editor") or OS.has_environment("GODOT_MCP_HEADLESS_CHILD"):
 		process_mode = Node.PROCESS_MODE_DISABLED
 		set_process(false)
+		set_physics_process(false)
 		return
 	process_mode = Node.PROCESS_MODE_ALWAYS
 
@@ -94,6 +107,18 @@ func _process(_delta: float) -> void:
 			_process_move_to(_delta)
 		State.WATCHING_SIGNALS:
 			_process_watch_signals()
+		State.STEPPING:
+			_process_step()
+		State.WAITING_CONDITION:
+			_process_wait_condition()
+
+
+func _physics_process(_delta: float) -> void:
+	if _state != State.STEPPING or not _step_physics:
+		return
+	_step_frames_remaining -= 1
+	if _step_frames_remaining <= 0:
+		_finish_step()
 
 
 # ── Request handling ──────────────────────────────────────────────────────────
@@ -172,6 +197,10 @@ func _handle_request() -> void:
 			_cmd_snapshot_state(params)
 		"restore_state":
 			_cmd_restore_state(params)
+		"step_frames":
+			_cmd_step_frames(params)
+		"wait_for_condition":
+			_cmd_wait_for_condition(params)
 		_:
 			_write_response({"error": "Unknown command: %s" % command})
 
@@ -1973,3 +2002,121 @@ func _cmd_restore_state(params: Dictionary) -> void:
 		"missing_nodes": missing,
 		"failed_properties": failed,
 	})
+
+
+# ── step_frames ────────────────────────────────────────────────────────────────
+
+## Advances the game exactly `count` process or physics frames, like a
+## debugger's frame-step, then re-pauses (unless resume_after). Unpauses first
+## if the game wasn't already running, so a caller starting from a normal
+## playing state also gets exactly `count` frames of simulation rather than
+## nothing happening.
+func _cmd_step_frames(params: Dictionary) -> void:
+	var raw_count: Variant = params.get("count", 1)
+	if not (raw_count is int or raw_count is float):
+		_write_response({"error": "'count' must be a number"})
+		return
+	var count: int = clampi(int(raw_count), 1, 600)
+	var physics: bool = params.get("physics", true)
+	var resume_after: bool = params.get("resume_after", false)
+
+	_pending_command = false  # Async command spanning multiple frames
+	_step_frames_remaining = count
+	_step_physics = physics
+	_step_resume_after = resume_after
+	get_tree().paused = false
+	_state = State.STEPPING
+
+
+func _process_step() -> void:
+	if FileAccess.file_exists(REQUEST_PATH):
+		_state = State.IDLE
+		_handle_request()
+		return
+	if _step_physics:
+		return  # Counted in _physics_process instead, to avoid double-counting.
+	_step_frames_remaining -= 1
+	if _step_frames_remaining <= 0:
+		_finish_step()
+
+
+func _finish_step() -> void:
+	get_tree().paused = not _step_resume_after
+	_state = State.IDLE
+	_write_response({"stepped": true, "physics": _step_physics, "paused": get_tree().paused})
+
+
+# ── wait_for_condition ───────────────────────────────────────────────────────
+
+## Polls a boolean GDScript expression against the running game every
+## poll_interval seconds until it's true or timeout elapses. Complements
+## set_determinism/snapshot_state/restore_state for reproducible playtests:
+## "step until X" rather than "step N frames and hope X happened by then".
+func _cmd_wait_for_condition(params: Dictionary) -> void:
+	var raw_expr: Variant = params.get("expression", "")
+	if not (raw_expr is String) or (raw_expr as String).strip_edges().is_empty():
+		_write_response({"error": "'expression' is required and must be a non-empty string"})
+		return
+	var expression: String = raw_expr
+
+	if get_tree().current_scene == null:
+		_write_response({"error": "No current scene"})
+		return
+
+	var raw_timeout: Variant = params.get("timeout", 5.0)
+	var timeout_sec: float = float(raw_timeout) if (raw_timeout is int or raw_timeout is float) else 5.0
+	timeout_sec = clampf(timeout_sec, 0.05, 60.0)
+
+	var raw_interval: Variant = params.get("poll_interval", 0.1)
+	var poll_interval_sec: float = float(raw_interval) if (raw_interval is int or raw_interval is float) else 0.1
+	poll_interval_sec = clampf(poll_interval_sec, 0.01, timeout_sec)
+
+	# A single boolean expression, not the multi-statement/top-level-func
+	# wrapping _cmd_execute_script does — this only ever needs one return.
+	var wrapped := "extends Node\nfunc run() -> bool:\n\treturn (%s)\n" % expression
+	var script := GDScript.new()
+	script.source_code = wrapped
+	var err := script.reload()
+	if err != OK:
+		_write_response({"error": "Expression compilation failed: %s" % error_string(err)})
+		return
+
+	_pending_command = false  # Async command spanning multiple frames
+	_wait_condition_script = script
+	_wait_condition_start_msec = Time.get_ticks_msec()
+	_wait_condition_timeout_msec = int(timeout_sec * 1000.0)
+	_wait_condition_poll_interval_msec = int(poll_interval_sec * 1000.0)
+	_wait_condition_next_poll_msec = _wait_condition_start_msec
+	_state = State.WAITING_CONDITION
+
+
+func _process_wait_condition() -> void:
+	if FileAccess.file_exists(REQUEST_PATH):
+		_state = State.IDLE
+		_wait_condition_script = null
+		_handle_request()
+		return
+
+	var now := Time.get_ticks_msec()
+	if now < _wait_condition_next_poll_msec:
+		return
+	_wait_condition_next_poll_msec = now + _wait_condition_poll_interval_msec
+
+	var temp_node := Node.new()
+	temp_node.set_script(_wait_condition_script)
+	get_tree().current_scene.add_child(temp_node)
+	var result: Variant = temp_node.run() if temp_node.has_method("run") else null
+	temp_node.queue_free()
+
+	var elapsed_msec: int = now - _wait_condition_start_msec
+
+	if result == true:
+		_state = State.IDLE
+		_wait_condition_script = null
+		_write_response({"condition_met": true, "elapsed_msec": elapsed_msec})
+		return
+
+	if elapsed_msec >= _wait_condition_timeout_msec:
+		_state = State.IDLE
+		_wait_condition_script = null
+		_write_response({"condition_met": false, "elapsed_msec": elapsed_msec, "timed_out": true})

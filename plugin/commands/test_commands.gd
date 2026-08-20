@@ -15,6 +15,8 @@ func get_commands() -> Dictionary:
 		"set_determinism": _set_determinism,
 		"snapshot_state": _snapshot_state,
 		"restore_state": _restore_state,
+		"step_frames": _step_frames,
+		"wait_for_condition": _wait_for_condition,
 	}
 
 
@@ -95,6 +97,26 @@ func get_command_schemas() -> Dictionary:
 				"name": {"type": "string", "required": true, "desc": "Name of a snapshot previously taken with snapshot_state"},
 			},
 			"annotations": {"readOnly": false, "destructive": true, "idempotent": true},
+		},
+		"step_frames": {
+			"category": "test",
+			"summary": "Advances the running game exactly N process or physics frames, like a debugger's frame-step, then re-pauses (unless resume_after is set). Unpauses first if the game wasn't already paused, so exactly N frames of simulation happen either way. Completes set_determinism's determinism story: seeded RNG + fixed tick + exact frame control.",
+			"params": {
+				"count": {"type": "int", "required": false, "default": 1, "desc": "Frames to advance, clamped 1-600"},
+				"physics": {"type": "bool", "required": false, "default": true, "desc": "Count physics frames (_physics_process); false counts process frames (_process) instead"},
+				"resume_after": {"type": "bool", "required": false, "default": false, "desc": "Leave the game running after stepping instead of re-pausing"},
+			},
+			"annotations": {"readOnly": false, "destructive": true, "idempotent": false},
+		},
+		"wait_for_condition": {
+			"category": "test",
+			"summary": "Polls a boolean GDScript expression against the running game every poll_interval seconds until it evaluates true or timeout elapses. 'step until X happens' instead of 'step N frames and hope X happened by then' — pairs with step_frames for reproducible scenarios.",
+			"params": {
+				"expression": {"type": "string", "required": true, "desc": "A single GDScript boolean expression, evaluated as a Node method body (e.g. 'get_node(\"/root/Main/Player\").health <= 0')"},
+				"timeout": {"type": "float", "required": false, "default": 5.0, "desc": "Max seconds to wait, clamped 0.05-60"},
+				"poll_interval": {"type": "float", "required": false, "default": 0.1, "desc": "Seconds between evaluations, clamped 0.01 to timeout"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
 		},
 	}
 
@@ -650,6 +672,46 @@ func _restore_state(params: Dictionary) -> Dictionary:
 		return name_result[1]
 
 	var result := await send_game_command("restore_state", {"name": name_result[0]})
+	if result.has("error"):
+		return result
+	return success(unwrap_game_result(result))
+
+
+func _step_frames(params: Dictionary) -> Dictionary:
+	var forwarded := {}
+	for key: String in ["count", "physics", "resume_after"]:
+		if params.has(key):
+			forwarded[key] = params[key]
+
+	var raw_count: Variant = params.get("count", 1)
+	var count: int = int(raw_count) if (raw_count is int or raw_count is float) else 1
+	# Stepping waits real wall-clock time for `count` frames to render, so the
+	# IPC timeout must scale with count rather than using send_game_command's
+	# 5s default, which a large step count could outrun.
+	var timeout_sec: float = maxf(5.0, float(clampi(count, 1, 600)) * 0.25)
+
+	var result := await send_game_command("step_frames", forwarded, timeout_sec)
+	if result.has("error"):
+		return result
+	return success(unwrap_game_result(result))
+
+
+func _wait_for_condition(params: Dictionary) -> Dictionary:
+	var expr_result := require_string(params, "expression")
+	if expr_result[1] != null:
+		return expr_result[1]
+
+	var forwarded := {"expression": expr_result[0]}
+	var raw_timeout: Variant = params.get("timeout", 5.0)
+	var timeout_sec: float = float(raw_timeout) if (raw_timeout is int or raw_timeout is float) else 5.0
+	timeout_sec = clampf(timeout_sec, 0.05, 60.0)
+	forwarded["timeout"] = timeout_sec
+	if params.has("poll_interval"):
+		forwarded["poll_interval"] = params["poll_interval"]
+
+	# The game side waits up to timeout_sec before answering; give the IPC
+	# call itself a margin on top so it isn't the one that times out first.
+	var result := await send_game_command("wait_for_condition", forwarded, timeout_sec + 2.0)
 	if result.has("error"):
 		return result
 	return success(unwrap_game_result(result))
