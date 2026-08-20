@@ -54,6 +54,10 @@ const _BUILTIN_MODULES: Array[String] = [
 ## module basename -> reason it could not be registered.
 var _unavailable_modules: Dictionary = {}
 
+## method_name -> {"min_godot": "4.4", "current": "4.3.0"} for methods a
+## module declared but that this engine's version can't support.
+var _version_gated: Dictionary = {}
+
 
 func _register_commands() -> void:
 	for module_name: String in _BUILTIN_MODULES:
@@ -103,15 +107,22 @@ func _register_builtin_module(module_name: String) -> void:
 	add_child(cmd)
 
 	var methods: Dictionary = cmd.get_commands()
-	for method_name: String in methods:
-		_command_handlers[method_name] = methods[method_name]
-	# A module that hasn't been given schemas yet just contributes nothing
-	# here rather than breaking startup — describe_method() reports those
-	# methods as undocumented instead of command_router failing to register.
+	var schemas: Dictionary = {}
 	if cmd.has_method("get_command_schemas"):
-		var schemas: Dictionary = cmd.get_command_schemas()
-		for method_name: String in schemas:
-			_command_schemas[method_name] = schemas[method_name]
+		schemas = cmd.get_command_schemas()
+
+	for method_name: String in methods:
+		var schema: Dictionary = schemas.get(method_name, {})
+		var min_godot: String = schema.get("min_godot", "")
+		if not min_godot.is_empty() and not _engine_meets_version(min_godot):
+			_version_gated[method_name] = {"min_godot": min_godot, "current": _engine_version_string()}
+			continue
+		_command_handlers[method_name] = methods[method_name]
+		# A module that hasn't been given schemas yet just contributes nothing
+		# here rather than breaking startup — describe_method() reports those
+		# methods as undocumented instead of command_router failing to register.
+		if schemas.has(method_name):
+			_command_schemas[method_name] = schema
 
 
 ## Built-in modules that could not be registered this session, as
@@ -120,6 +131,40 @@ func _register_builtin_module(module_name: String) -> void:
 ## that never existed.
 func get_unavailable_modules() -> Dictionary:
 	return _unavailable_modules.duplicate()
+
+
+## True when the running engine's version is >= `min_version` ("4.4" or
+## "4.4.1"). Compares major.minor.patch numerically component by component,
+## not as strings, so "4.10" correctly outranks "4.9".
+func _engine_meets_version(min_version: String) -> bool:
+	var required: PackedStringArray = min_version.split(".")
+	var info := Engine.get_version_info()
+	var have: Array[int] = [
+		int(info.get("major", 0)),
+		int(info.get("minor", 0)),
+		int(info.get("patch", 0)),
+	]
+	for i in required.size():
+		var req_part := int(required[i])
+		var have_part: int = have[i] if i < have.size() else 0
+		if have_part > req_part:
+			return true
+		if have_part < req_part:
+			return false
+	return true
+
+
+func _engine_version_string() -> String:
+	var info := Engine.get_version_info()
+	return "%s.%s.%s" % [info.get("major", 0), info.get("minor", 0), info.get("patch", 0)]
+
+
+## Methods a module declared (with a schema min_godot) that this engine's
+## version is too old to run, as {method_name: {min_godot, current}}.
+## Surfaced through get_available_methods() alongside unavailable_modules —
+## same "tell a gap apart from a nonexistent method" purpose, different cause.
+func get_version_gated_methods() -> Dictionary:
+	return _version_gated.duplicate(true)
 
 
 ## Project-side extension point: any *.gd file dropped into
@@ -169,19 +214,22 @@ func _register_user_command_file(script_path: String) -> bool:
 	add_child(cmd)
 
 	var methods: Dictionary = cmd.get_commands()
-	var added_names: Array = []
+	var schemas: Dictionary = {}
+	if cmd.has_method("get_command_schemas"):
+		schemas = cmd.get_command_schemas()
+
 	for method_name: String in methods:
 		if _command_handlers.has(method_name):
 			push_warning("[MCP] User command module '%s' redefines existing method '%s'; ignoring to protect built-ins" % [script_path, method_name])
 			continue
+		var schema: Dictionary = schemas.get(method_name, {})
+		var min_godot: String = schema.get("min_godot", "")
+		if not min_godot.is_empty() and not _engine_meets_version(min_godot):
+			_version_gated[method_name] = {"min_godot": min_godot, "current": _engine_version_string()}
+			continue
 		_command_handlers[method_name] = methods[method_name]
-		added_names.append(method_name)
-
-	if cmd.has_method("get_command_schemas"):
-		var schemas: Dictionary = cmd.get_command_schemas()
-		for method_name: String in schemas:
-			if method_name in added_names:
-				_command_schemas[method_name] = schemas[method_name]
+		if schemas.has(method_name):
+			_command_schemas[method_name] = schema
 
 	return true
 
@@ -195,6 +243,8 @@ func _register_meta_commands() -> void:
 		return {"result": {
 			"methods": get_available_methods(),
 			"unavailable_modules": _unavailable_modules,
+			"version_gated": _version_gated,
+			"godot_version": _engine_version_string(),
 		}}
 
 	_command_handlers["describe_methods"] = func(params: Dictionary) -> Dictionary:
@@ -216,7 +266,7 @@ func _register_meta_commands() -> void:
 
 	_command_schemas["get_available_methods"] = {
 		"category": "meta",
-		"summary": "List every registered method name, unfiltered and without schema detail. Also returns unavailable_modules: built-in command modules that failed to load this session (empty on a healthy addon), so a missing method can be told apart from a degraded install.",
+		"summary": "List every registered method name, unfiltered and without schema detail. Also returns unavailable_modules (built-in command modules that failed to load this session), version_gated (methods that declare a min_godot newer than this engine), and godot_version — so a missing method can be told apart from a degraded install or an unsupported engine version.",
 		"params": {},
 		"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
 	}

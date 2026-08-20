@@ -12,6 +12,8 @@ Assistant IA <---stdio/MCP---> godot-mcp <---WebSocket:6505---> Plugin Godot
 
 **9 outils MCP** pour piloter l'éditeur : `godot_call` (toutes les méthodes de l'addon — le catalogue est découvert en direct, jamais figé dans ce dépôt), `godot_list_methods`, `godot_describe`, `godot_info`, `godot_screenshot`, `godot_execute`, `godot_status`, `godot_doctor`, `godot_assets`. Cette surface tient en ~1200 tokens (mesuré par `npm run token-cost`) — bien moins que la plupart des serveurs MCP Godot, qui exposent chaque méthode de l'addon comme un tool séparé.
 
+**Godot 4.3+.** Certaines méthodes exigent une version plus récente (déclarée par module via `min_godot` dans son schéma) ; sur un moteur trop ancien, seules ces méthodes-là sont retirées de la surface au lieu de faire échouer le chargement de l'addon — visible via `get_available_methods` (champ `version_gated`) ou `godot_doctor`.
+
 ## Installation
 
 ### 1. Plugin Godot
@@ -154,6 +156,8 @@ AI Assistant <---stdio/MCP---> godot-mcp <---WebSocket:6505---> Godot Plugin
 ```
 
 **9 MCP tools** to control the editor: `godot_call` (every addon method — the catalog is discovered live, never hardcoded in this repo), `godot_list_methods`, `godot_describe`, `godot_info`, `godot_screenshot`, `godot_execute`, `godot_status`, `godot_doctor`, `godot_assets`. This surface weighs ~1200 tokens (measured by `npm run token-cost`) — far less than most Godot MCP servers, which expose every addon method as its own tool.
+
+**Godot 4.3+.** Some methods require a newer version (declared per module via `min_godot` in its schema); on an older engine only those specific methods are dropped from the surface instead of the whole addon failing to load — visible via `get_available_methods` (`version_gated` field) or `godot_doctor`.
 
 ## Setup
 

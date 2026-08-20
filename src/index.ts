@@ -310,6 +310,46 @@ async function runDoctor(): Promise<DoctorCheck[]> {
     checks.push({ ok: false, label: "Live method contract", detail: "Skipped — no editor connected." });
   }
 
+  // 5b. Degraded addon: modules that failed to load, or methods gated behind
+  // a newer Godot than the connected editor — both fail soft on the addon
+  // side (command_router.gd), so this is the only place either surfaces.
+  if (peerCount > 0) {
+    try {
+      const info = await godot.call("get_available_methods") as {
+        unavailable_modules?: Record<string, string>;
+        version_gated?: Record<string, { min_godot: string; current: string }>;
+        godot_version?: string;
+      };
+      const unavailable = Object.entries(info.unavailable_modules ?? {});
+      const gated = Object.entries(info.version_gated ?? {});
+      if (unavailable.length === 0 && gated.length === 0) {
+        checks.push({
+          ok: true,
+          label: "Addon module health",
+          detail: `All command modules loaded on Godot ${info.godot_version ?? "unknown"}.`,
+        });
+      } else {
+        const parts: string[] = [];
+        if (unavailable.length > 0) {
+          parts.push(`${unavailable.length} module(s) failed to load: ${unavailable.map(([m, reason]) => `${m} (${reason})`).join("; ")}`);
+        }
+        if (gated.length > 0) {
+          parts.push(`${gated.length} method(s) version-gated on Godot ${info.godot_version}: ${gated.map(([m, g]) => `${m} (needs ${g.min_godot})`).join("; ")}`);
+        }
+        checks.push({
+          ok: false,
+          label: "Addon module health",
+          detail: parts.join(" | "),
+          suggestion: unavailable.length > 0
+            ? "A module failed to parse — check the Godot editor's Output panel at startup for the exact error."
+            : "Upgrade Godot to reach the gated methods, or ignore them if you don't need that feature.",
+        });
+      }
+    } catch (err) {
+      checks.push({ ok: false, label: "Addon module health", detail: `Could not query the editor: ${(err as Error).message}` });
+    }
+  }
+
   // 6. Godot binary resolvable, for npm run test:godot
   const bin = resolveGodotBinary();
   if (bin.found) {
