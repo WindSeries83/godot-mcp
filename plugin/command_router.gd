@@ -15,56 +15,111 @@ func _ready() -> void:
 	_register_commands()
 
 
-func _register_commands() -> void:
-	var command_classes := [
-		preload("res://addons/godot_mcp/commands/project_commands.gd"),
-		preload("res://addons/godot_mcp/commands/scene_commands.gd"),
-		preload("res://addons/godot_mcp/commands/node_commands.gd"),
-		preload("res://addons/godot_mcp/commands/script_commands.gd"),
-		preload("res://addons/godot_mcp/commands/editor_commands.gd"),
-		preload("res://addons/godot_mcp/commands/input_commands.gd"),
-		preload("res://addons/godot_mcp/commands/runtime_commands.gd"),
-		preload("res://addons/godot_mcp/commands/animation_commands.gd"),
-		preload("res://addons/godot_mcp/commands/tilemap_commands.gd"),
-		preload("res://addons/godot_mcp/commands/theme_commands.gd"),
-		preload("res://addons/godot_mcp/commands/profiling_commands.gd"),
-		preload("res://addons/godot_mcp/commands/batch_commands.gd"),
-		preload("res://addons/godot_mcp/commands/shader_commands.gd"),
-		preload("res://addons/godot_mcp/commands/export_commands.gd"),
-		preload("res://addons/godot_mcp/commands/resource_commands.gd"),
-		preload("res://addons/godot_mcp/commands/input_map_commands.gd"),
-		preload("res://addons/godot_mcp/commands/scene_3d_commands.gd"),
-		preload("res://addons/godot_mcp/commands/physics_commands.gd"),
-		preload("res://addons/godot_mcp/commands/analysis_commands.gd"),
-		preload("res://addons/godot_mcp/commands/animation_tree_commands.gd"),
-		preload("res://addons/godot_mcp/commands/audio_commands.gd"),
-		preload("res://addons/godot_mcp/commands/navigation_commands.gd"),
-		preload("res://addons/godot_mcp/commands/particle_commands.gd"),
-		preload("res://addons/godot_mcp/commands/test_commands.gd"),
-		preload("res://addons/godot_mcp/commands/android_commands.gd"),
-		preload("res://addons/godot_mcp/commands/headless_commands.gd"),
-	]
+## Built-in command modules, by file basename. Deliberately NOT preload():
+## preload() resolves at compile time, so a parse error in any single module
+## (or in base_command.gd, which they all extend) prevented command_router.gd
+## itself from compiling and took the whole plugin down with it — see the
+## Godot 4.3 `var x := typed_array.pop_front()` breakage. Runtime load() lets
+## one bad module degrade to N-1 working modules instead of zero, and reports
+## which one failed through get_unavailable_modules().
+const _BUILTIN_MODULES: Array[String] = [
+	"project_commands",
+	"scene_commands",
+	"node_commands",
+	"script_commands",
+	"editor_commands",
+	"input_commands",
+	"runtime_commands",
+	"animation_commands",
+	"tilemap_commands",
+	"theme_commands",
+	"profiling_commands",
+	"batch_commands",
+	"shader_commands",
+	"export_commands",
+	"resource_commands",
+	"input_map_commands",
+	"scene_3d_commands",
+	"physics_commands",
+	"analysis_commands",
+	"animation_tree_commands",
+	"audio_commands",
+	"navigation_commands",
+	"particle_commands",
+	"test_commands",
+	"android_commands",
+	"headless_commands",
+]
 
-	for cmd_class in command_classes:
-		var cmd: Node = cmd_class.new()
-		cmd.editor_plugin = editor_plugin
-		add_child(cmd)
-		var methods: Dictionary = cmd.get_commands()
-		for method_name: String in methods:
-			_command_handlers[method_name] = methods[method_name]
-		# A module that hasn't been given schemas yet (or a stale command_classes
-		# entry) just contributes nothing here rather than breaking startup —
-		# describe_method() reports those methods as undocumented instead of
-		# command_router failing to register anything.
-		if cmd.has_method("get_command_schemas"):
-			var schemas: Dictionary = cmd.get_command_schemas()
-			for method_name: String in schemas:
-				_command_schemas[method_name] = schemas[method_name]
+## module basename -> reason it could not be registered.
+var _unavailable_modules: Dictionary = {}
+
+
+func _register_commands() -> void:
+	for module_name: String in _BUILTIN_MODULES:
+		_register_builtin_module(module_name)
 
 	_register_user_commands()
 	_register_meta_commands()
 
-	print("[MCP] Registered %d commands (%d with schemas)" % [_command_handlers.size(), _command_schemas.size()])
+	if _unavailable_modules.is_empty():
+		print("[MCP] Registered %d commands (%d with schemas)" % [
+			_command_handlers.size(), _command_schemas.size()
+		])
+	else:
+		# Loud, because a silently smaller tool surface is worse than a crash:
+		# an agent would just see methods "not existing" with no explanation.
+		push_warning("[MCP] %d command module(s) unavailable: %s" % [
+			_unavailable_modules.size(), ", ".join(_unavailable_modules.keys())
+		])
+		print("[MCP] Registered %d commands (%d with schemas), %d module(s) UNAVAILABLE: %s" % [
+			_command_handlers.size(), _command_schemas.size(),
+			_unavailable_modules.size(), ", ".join(_unavailable_modules.keys())
+		])
+
+
+## Loads and registers one built-in module, recording the reason in
+## _unavailable_modules instead of raising if it can't be used. Note that a
+## GDScript parse error makes load() return null without throwing, which is
+## exactly the case that used to be fatal here.
+func _register_builtin_module(module_name: String) -> void:
+	var script_path := "res://addons/godot_mcp/commands/%s.gd" % module_name
+
+	var script: Variant = load(script_path)
+	if script == null or not (script is Script):
+		_unavailable_modules[module_name] = "script failed to load (parse error, or file missing)"
+		return
+
+	var instance: Object = (script as Script).new()
+	if not (instance is Node):
+		_unavailable_modules[module_name] = "script is not a Node subclass"
+		return
+	if not instance.has_method("get_commands"):
+		_unavailable_modules[module_name] = "script does not expose get_commands()"
+		return
+
+	var cmd: Node = instance
+	cmd.editor_plugin = editor_plugin
+	add_child(cmd)
+
+	var methods: Dictionary = cmd.get_commands()
+	for method_name: String in methods:
+		_command_handlers[method_name] = methods[method_name]
+	# A module that hasn't been given schemas yet just contributes nothing
+	# here rather than breaking startup — describe_method() reports those
+	# methods as undocumented instead of command_router failing to register.
+	if cmd.has_method("get_command_schemas"):
+		var schemas: Dictionary = cmd.get_command_schemas()
+		for method_name: String in schemas:
+			_command_schemas[method_name] = schemas[method_name]
+
+
+## Built-in modules that could not be registered this session, as
+## {module_name: reason}. Surfaced through the discovery layer so an agent
+## seeing a method "missing" can tell a degraded addon apart from a method
+## that never existed.
+func get_unavailable_modules() -> Dictionary:
+	return _unavailable_modules.duplicate()
 
 
 ## Project-side extension point: any *.gd file dropped into
@@ -137,7 +192,10 @@ func _register_user_command_file(script_path: String) -> bool:
 ## Node side never needs a second RPC shape just to ask "what can I call?".
 func _register_meta_commands() -> void:
 	_command_handlers["get_available_methods"] = func(_params: Dictionary) -> Dictionary:
-		return {"result": {"methods": get_available_methods()}}
+		return {"result": {
+			"methods": get_available_methods(),
+			"unavailable_modules": _unavailable_modules,
+		}}
 
 	_command_handlers["describe_methods"] = func(params: Dictionary) -> Dictionary:
 		var names: Variant = params.get("methods", [])
@@ -158,7 +216,7 @@ func _register_meta_commands() -> void:
 
 	_command_schemas["get_available_methods"] = {
 		"category": "meta",
-		"summary": "List every registered method name, unfiltered and without schema detail.",
+		"summary": "List every registered method name, unfiltered and without schema detail. Also returns unavailable_modules: built-in command modules that failed to load this session (empty on a healthy addon), so a missing method can be told apart from a degraded install.",
 		"params": {},
 		"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
 	}

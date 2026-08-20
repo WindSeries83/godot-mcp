@@ -40,12 +40,15 @@ const TS_HARDCODED_METHODS = [
 const META_METHODS = ["get_available_methods", "describe_methods", "describe_method"];
 
 function extractRegisteredModules(routerSrc) {
-  const block = /_register_commands\(\)[\s\S]*?var command_classes := \[([\s\S]*?)\]/.exec(routerSrc);
-  if (!block) throw new Error("Could not find command_classes array in command_router.gd");
+  // Modules are listed by basename in _BUILTIN_MODULES and load()ed at
+  // runtime (not preload()ed at compile time), so one module failing to
+  // parse degrades the surface instead of killing the whole plugin.
+  const block = /const _BUILTIN_MODULES: Array\[String\] = \[([\s\S]*?)\n\]/.exec(routerSrc);
+  if (!block) throw new Error("Could not find _BUILTIN_MODULES array in command_router.gd");
   const modules = [];
-  const re = /preload\("res:\/\/addons\/godot_mcp\/commands\/([a-zA-Z0-9_]+\.gd)"\)/g;
+  const re = /"([a-zA-Z0-9_]+)"/g;
   let m;
-  while ((m = re.exec(block[1]))) modules.push(m[1]);
+  while ((m = re.exec(block[1]))) modules.push(m[1] + ".gd");
   return modules;
 }
 
@@ -118,7 +121,7 @@ export function checkContract(repoRoot) {
   // Check 1: every module file on disk is registered in command_router.gd.
   for (const file of filesOnDisk) {
     if (!registeredModules.has(file)) {
-      errors.push(`plugin/commands/${file} exists but is not preloaded in command_router.gd's command_classes array — it is dead code and will silently register no methods.`);
+      errors.push(`plugin/commands/${file} exists but is not listed in command_router.gd's _BUILTIN_MODULES array — it is dead code and will silently register no methods.`);
     }
   }
   for (const registered of registeredModules) {
