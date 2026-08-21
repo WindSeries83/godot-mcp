@@ -11,6 +11,8 @@ func get_commands() -> Dictionary:
 		"create_resource": _create_resource,
 		"get_resource_preview": _get_resource_preview,
 		"resource_contact_sheet": _resource_contact_sheet,
+		"describe_sprite": _describe_sprite,
+		"slice_sprite_sheet": _slice_sprite_sheet,
 	}
 
 
@@ -64,7 +66,205 @@ func get_command_schemas() -> Dictionary:
 			},
 			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
 		},
+		"describe_sprite": {
+			"category": "resource",
+			"summary": "Dimensions, format, and alpha-channel presence for an image file or image-producing resource. If columns and/or rows are given, also computes the implied per-cell size — pass them once you know the grid (e.g. from the filename or a companion .import file) rather than guessing it from pixel data.",
+			"params": {
+				"path": {"type": "string", "required": true, "desc": "res:// path to an image file or an image-producing resource"},
+				"columns": {"type": "int", "required": false, "desc": "If known, used with rows (or alone, with rows=1) to compute cell_width/cell_height"},
+				"rows": {"type": "int", "required": false, "desc": "If known, used with columns (or alone, with columns=1) to compute cell_width/cell_height"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"slice_sprite_sheet": {
+			"category": "resource",
+			"summary": "Computes the grid of cell regions in a sprite sheet from either columns+rows or cell_width+cell_height (exactly one pair), and optionally crops each cell to its own PNG file. Without save_dir, returns just the grid metadata (index/col/row/region) — no image data — since a full sheet's cells as base64 can be large.",
+			"params": {
+				"path": {"type": "string", "required": true, "desc": "res:// path to an image file or an image-producing resource"},
+				"columns": {"type": "int", "required": false, "desc": "Grid columns; requires rows, mutually exclusive with cell_width/cell_height"},
+				"rows": {"type": "int", "required": false, "desc": "Grid rows; requires columns, mutually exclusive with cell_width/cell_height"},
+				"cell_width": {"type": "int", "required": false, "desc": "Cell width in pixels; requires cell_height, mutually exclusive with columns/rows"},
+				"cell_height": {"type": "int", "required": false, "desc": "Cell height in pixels; requires cell_width, mutually exclusive with columns/rows"},
+				"save_dir": {"type": "string", "required": false, "default": "", "desc": "If given, crop and save each cell here as cell_<row>_<col>.png (res://, user://, or absolute)"},
+				"overwrite": {"type": "bool", "required": false, "default": false, "desc": "Overwrite existing cell files in save_dir"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
 	}
+
+
+## Shared image loader for describe_sprite/slice_sprite_sheet/get_resource_preview's
+## "load as image file, or load as resource and extract an Image" logic.
+## Returns {"image": Image} on success, {"error": Dictionary} on failure —
+## callers check has("error") rather than this raising, since a missing file
+## or an unsupported resource type are expected outcomes here, not bugs.
+func _load_image(path: String) -> Dictionary:
+	if not FileAccess.file_exists(path):
+		return {"error": error_not_found("Resource '%s'" % path)}
+
+	var ext := path.get_extension().to_lower()
+	var image: Image = null
+	if ext in ["png", "jpg", "jpeg", "bmp", "webp", "svg"]:
+		image = Image.new()
+		var err := image.load(path)
+		if err != OK:
+			return {"error": error_internal("Failed to load image: %s" % error_string(err))}
+	else:
+		var resource: Resource = ResourceLoader.load(path)
+		if resource == null:
+			return {"error": error_internal("Failed to load resource: %s" % path)}
+		if resource is Texture2D:
+			image = (resource as Texture2D).get_image()
+		elif resource is Image:
+			image = resource as Image
+		else:
+			return {"error": error_invalid_params("Resource type '%s' is not an image" % resource.get_class())}
+
+	if image == null:
+		return {"error": error_internal("Could not extract image from resource")}
+	return {"image": image}
+
+
+func _describe_sprite(params: Dictionary) -> Dictionary:
+	var result := require_string(params, "path")
+	if result[1] != null:
+		return result[1]
+	var path: String = result[0]
+
+	var loaded := _load_image(path)
+	if loaded.has("error"):
+		return loaded["error"]
+	var image: Image = loaded["image"]
+
+	var info := {
+		"path": path,
+		"width": image.get_width(),
+		"height": image.get_height(),
+		"format": image.get_format(),
+		"has_alpha": image.detect_alpha() != Image.ALPHA_NONE,
+		"has_mipmaps": image.has_mipmaps(),
+	}
+
+	if params.has("columns") or params.has("rows"):
+		var grid := _resolve_sprite_grid(image, params)
+		if grid.has("error"):
+			return grid["error"]
+		info["columns"] = grid["columns"]
+		info["rows"] = grid["rows"]
+		info["cell_width"] = grid["cell_width"]
+		info["cell_height"] = grid["cell_height"]
+
+	return success(info)
+
+
+## Resolves a sprite sheet's grid from either columns(+rows) or
+## cell_width(+cell_height) in `params`, against `image`'s actual pixel
+## dimensions. Exactly one pair may be given. A missing partner defaults to 1
+## (so "columns: 4" alone means a single row of 4), matching how sheets are
+## usually described informally. Returns {"error": Dictionary} if both pairs
+## are given, neither is given, or the dimensions don't divide evenly —
+## an off-by-one grid guess would silently crop wrong.
+func _resolve_sprite_grid(image: Image, params: Dictionary) -> Dictionary:
+	var has_grid: bool = params.has("columns") or params.has("rows")
+	var has_cell: bool = params.has("cell_width") or params.has("cell_height")
+	if has_grid and has_cell:
+		return {"error": error_invalid_params("Give either columns/rows or cell_width/cell_height, not both")}
+	if not has_grid and not has_cell:
+		return {"error": error_invalid_params("One of columns/rows or cell_width/cell_height is required")}
+
+	var width := image.get_width()
+	var height := image.get_height()
+	var columns: int
+	var rows: int
+	var cell_width: int
+	var cell_height: int
+
+	if has_grid:
+		columns = optional_int(params, "columns", 1)
+		rows = optional_int(params, "rows", 1)
+		if columns < 1 or rows < 1:
+			return {"error": error_invalid_params("columns and rows must be >= 1")}
+		if width % columns != 0 or height % rows != 0:
+			return {"error": error_invalid_params(
+				"Image is %dx%d, which does not divide evenly into a %dx%d grid" % [width, height, columns, rows]
+			)}
+		cell_width = width / columns
+		cell_height = height / rows
+	else:
+		cell_width = optional_int(params, "cell_width", width)
+		cell_height = optional_int(params, "cell_height", height)
+		if cell_width < 1 or cell_height < 1:
+			return {"error": error_invalid_params("cell_width and cell_height must be >= 1")}
+		if width % cell_width != 0 or height % cell_height != 0:
+			return {"error": error_invalid_params(
+				"Image is %dx%d, which does not divide evenly into %dx%d cells" % [width, height, cell_width, cell_height]
+			)}
+		columns = width / cell_width
+		rows = height / cell_height
+
+	return {"columns": columns, "rows": rows, "cell_width": cell_width, "cell_height": cell_height}
+
+
+func _slice_sprite_sheet(params: Dictionary) -> Dictionary:
+	var result := require_string(params, "path")
+	if result[1] != null:
+		return result[1]
+	var path: String = result[0]
+
+	var loaded := _load_image(path)
+	if loaded.has("error"):
+		return loaded["error"]
+	var image: Image = loaded["image"]
+
+	var grid := _resolve_sprite_grid(image, params)
+	if grid.has("error"):
+		return grid["error"]
+	var columns: int = grid["columns"]
+	var rows: int = grid["rows"]
+	var cell_width: int = grid["cell_width"]
+	var cell_height: int = grid["cell_height"]
+
+	var cells: Array = []
+	for row in rows:
+		for col in columns:
+			cells.append({
+				"index": row * columns + col,
+				"col": col,
+				"row": row,
+				"region": {"x": col * cell_width, "y": row * cell_height, "width": cell_width, "height": cell_height},
+			})
+
+	var save_dir: String = optional_string(params, "save_dir", "")
+	if save_dir.is_empty():
+		return success({
+			"path": path, "columns": columns, "rows": rows,
+			"cell_width": cell_width, "cell_height": cell_height, "cells": cells,
+		})
+
+	var overwrite: bool = optional_bool(params, "overwrite", false)
+	# Check every target file before writing any of them, so a conflict
+	# partway through a large grid doesn't leave a half-written directory.
+	for cell: Dictionary in cells:
+		var conflict := guard_overwrite("%s/cell_%d_%d.png" % [save_dir, cell["row"], cell["col"]], overwrite)
+		if conflict.has("error"):
+			return conflict
+
+	var saved_paths: Array = []
+	for cell: Dictionary in cells:
+		var region: Dictionary = cell["region"]
+		var cropped := image.get_region(Rect2i(region["x"], region["y"], region["width"], region["height"]))
+		var rel_path := "%s/cell_%d_%d.png" % [save_dir, cell["row"], cell["col"]]
+		var abs_path := resolve_save_path(rel_path)
+		var err := cropped.save_png(abs_path)
+		if err != OK:
+			return error_internal("Failed to save cell %d,%d: %s" % [cell["row"], cell["col"], error_string(err)])
+		saved_paths.append(rel_path)
+
+	return success({
+		"path": path, "columns": columns, "rows": rows,
+		"cell_width": cell_width, "cell_height": cell_height, "cells": cells,
+		"saved_dir": save_dir, "saved_files": saved_paths.size(),
+	})
 
 
 func _read_resource(params: Dictionary) -> Dictionary:
