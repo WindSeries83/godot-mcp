@@ -1,18 +1,71 @@
 [🇫🇷 Français](#fr) · [🇬🇧 English](#en)
 
+![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
+![Godot 4.3+](https://img.shields.io/badge/Godot-4.3%2B-478cbf.svg)
+![Node >=18](https://img.shields.io/badge/Node-%3E%3D18-339933.svg)
+![Zero runtime deps](https://img.shields.io/badge/runtime%20deps-MCP%20SDK%20only-informational.svg)
+
 ---
 
 # <a id="fr"></a>godot-mcp
 
-Pont MCP entre un assistant IA et l'éditeur Godot.
+**Donnez à votre assistant IA les mains sur l'éditeur Godot — sans lui donner 100 outils à trier.**
 
 ```
 Assistant IA <---stdio/MCP---> godot-mcp <---WebSocket:6505---> Plugin Godot
 ```
 
-**10 outils MCP** pour piloter l'éditeur : `godot_call` (toutes les méthodes de l'addon — le catalogue est découvert en direct, jamais figé dans ce dépôt ; accepte `async: true` pour les appels longs, à relire via `godot_job`), `godot_list_methods`, `godot_describe`, `godot_info`, `godot_screenshot`, `godot_execute`, `godot_status`, `godot_job`, `godot_doctor`, `godot_assets`. Cette surface tient en ~1460 tokens (mesuré par `npm run token-cost`) — bien moins que la plupart des serveurs MCP Godot, qui exposent chaque méthode de l'addon comme un tool séparé.
+## Pourquoi celui-ci
 
-**Godot 4.3+.** Certaines méthodes exigent une version plus récente (déclarée par module via `min_godot` dans son schéma) ; sur un moteur trop ancien, seules ces méthodes-là sont retirées de la surface au lieu de faire échouer le chargement de l'addon — visible via `get_available_methods` (champ `version_gated`) ou `godot_doctor`.
+La plupart des serveurs MCP Godot exposent chaque méthode de l'addon comme
+un *tool* MCP séparé — 50, 80, parfois plus de 100 entrées dans le catalogue
+que le modèle doit lire et trier avant chaque appel. Plus la surface est
+large, moins un LLM choisit le bon outil de façon fiable, et plus chaque
+requête coûte cher en tokens rien que pour décrire les outils disponibles.
+
+godot-mcp prend le pari inverse : **10 outils**, dont un seul (`godot_call`)
+donne accès à un catalogue de **210 méthodes** réparties en ~25 catégories
+(scène, nodes, 3D, physique, animation, shaders, tilemap, particules, audio,
+navigation, export Android, tests…), découvert **en direct** auprès de
+l'éditeur connecté plutôt que figé dans ce dépôt. Le modèle demande le
+schéma dont il a besoin (`godot_describe`) au lieu de tout charger d'un
+coup. Résultat mesuré (`npm run token-cost`) : **~1460 tokens** pour toute
+la surface d'outils.
+
+Le reste tient en une phrase : **zéro dépendance runtime** en dehors du SDK
+MCP, **aucun service externe**, le plugin Godot est un simple client
+WebSocket — vous savez exactement ce qui tourne et où.
+
+### Ce qui distingue ce pont d'un simple exécuteur de commandes
+
+- **Garde-fous, pas juste des fonctions.** Les opérations destructrices
+  (suppression de fichier, édition de script, code arbitraire) exigent
+  `confirm: true` ; les éditions de script portent un garde optimiste par
+  SHA-256 pour ne pas écraser silencieusement un changement fait entre-temps
+  dans l'éditeur ; les mutations de scène passent par
+  `EditorUndoRedoManager` — un Ctrl-Z suffit toujours à annuler.
+- **Multi-éditeur.** Plusieurs projets Godot peuvent se connecter en même
+  temps ; `godot_status {"select": "..."}` épingle celui qui doit recevoir
+  les appels au lieu de tomber sur le premier connecté par hasard.
+- **Les opérations longues ne timeout plus.** `godot_call {"async": true}`
+  rend la main immédiatement avec un `job_id` à relire via `godot_job` —
+  un stress test de 60s ne meurt plus au bout de 30.
+- **Compatibilité de version fine.** Chaque méthode déclare la version
+  Godot minimale qu'elle requiert ; sur un moteur plus ancien, seules ces
+  méthodes-là disparaissent du catalogue au lieu de faire échouer tout
+  l'addon.
+- **Capture d'erreurs structurée**, pas du scraping d'UI : les erreurs
+  runtime sont interceptées via le signal `debug_data` du debugger Godot.
+- **Playtesting déterministe** : seed RNG fixée, tick de simulation fixe,
+  snapshots d'état, avance frame-par-frame (`step_frames`) ou jusqu'à
+  condition (`wait_for_condition`) — pour reproduire un bug plutôt que le
+  chasser à l'aveugle.
+- **Perception 3D** : modes de rendu debug (wireframe, overdraw, éclairage
+  seul…) sur les captures d'écran, détection d'objets qui se chevauchent ou
+  flottent, test de frustum caméra, couverture des lumières — un lint
+  spatial pour repérer ce qu'un screenshot seul ne montre pas.
+- **Assets CC0 intégrés** : recherche, prévisualisation et import direct
+  depuis Poly Haven et ambientCG, sans quitter la conversation.
 
 ## Installation
 
@@ -53,13 +106,14 @@ Ajoutez à la config de votre client IA (`.mcp.json`, `claude.json`, `opencode.j
 
 | Outil | Description |
 |-------|-------------|
-| `godot_call` | Appelle n'importe quelle méthode |
+| `godot_call` | Appelle n'importe quelle méthode du catalogue (`async: true` pour les appels longs) |
 | `godot_list_methods` | Liste les méthodes par catégorie (en direct depuis l'éditeur connecté) |
 | `godot_describe` | Schéma complet (paramètres, types, annotations) d'une ou plusieurs méthodes |
 | `godot_info` | Infos projet |
 | `godot_screenshot` | Capture éditeur en PNG |
 | `godot_execute` | Exécute du GDScript |
-| `godot_status` | Vérifie la connexion |
+| `godot_status` | Vérifie la connexion, épingle un éditeur (`select`) si plusieurs sont connectés |
+| `godot_job` | Relit le résultat d'un appel `async: true` |
 | `godot_doctor` | Diagnostic complet : port, connexion, auth, contrat addon/serveur, binaire Godot |
 | `godot_assets` | Recherche/prévisualise/importe des assets CC0 (Poly Haven, ambientCG) |
 
@@ -149,15 +203,62 @@ Ce plugin Godot dérive de [godot-mcp-pro](https://github.com/youichi-uda/godot-
 
 # <a id="en"></a>godot-mcp
 
-MCP bridge between an AI assistant and the Godot editor.
+**Give your AI assistant real control of the Godot editor — without handing it 100 tools to sort through.**
 
 ```
 AI Assistant <---stdio/MCP---> godot-mcp <---WebSocket:6505---> Godot Plugin
 ```
 
-**10 MCP tools** to control the editor: `godot_call` (every addon method — the catalog is discovered live, never hardcoded in this repo; accepts `async: true` for long-running calls, polled via `godot_job`), `godot_list_methods`, `godot_describe`, `godot_info`, `godot_screenshot`, `godot_execute`, `godot_status`, `godot_job`, `godot_doctor`, `godot_assets`. This surface weighs ~1460 tokens (measured by `npm run token-cost`) — far less than most Godot MCP servers, which expose every addon method as its own tool.
+## Why this one
 
-**Godot 4.3+.** Some methods require a newer version (declared per module via `min_godot` in its schema); on an older engine only those specific methods are dropped from the surface instead of the whole addon failing to load — visible via `get_available_methods` (`version_gated` field) or `godot_doctor`.
+Most Godot MCP servers expose every addon method as its own MCP tool — 50,
+80, sometimes 100+ entries the model has to read and sort through before
+every single call. The bigger that surface gets, the less reliably an LLM
+picks the right tool, and the more tokens get burned on tool descriptions
+before the conversation even starts.
+
+godot-mcp takes the opposite bet: **10 tools**, one of which (`godot_call`)
+opens onto a catalog of **210 methods** across ~25 categories (scene,
+nodes, 3D, physics, animation, shaders, tilemaps, particles, audio,
+navigation, Android export, testing…), discovered **live** from the
+connected editor instead of hardcoded in this repo. The model asks for the
+schema it actually needs (`godot_describe`) instead of loading everything
+up front. Measured result (`npm run token-cost`): **~1460 tokens** for the
+whole tool surface.
+
+Everything else fits in one sentence: **zero runtime dependencies** beyond
+the MCP SDK, **no external services**, the Godot plugin is a plain
+WebSocket client — you know exactly what's running and where.
+
+### What sets this apart from a plain command runner
+
+- **Guardrails, not just functions.** Destructive operations (deleting a
+  file, editing a script, running arbitrary code) require `confirm: true`;
+  script edits carry an optimistic SHA-256 guard so they can't silently
+  clobber a change made in the editor in the meantime; scene mutations go
+  through `EditorUndoRedoManager` — a plain Ctrl-Z always undoes them.
+- **Multi-editor aware.** Several Godot projects can stay connected at
+  once; `godot_status {"select": "..."}` pins which one receives calls
+  instead of falling back to whichever connected first.
+- **Long operations stop timing out.** `godot_call {"async": true}` returns
+  a `job_id` immediately, polled via `godot_job` — a 60-second stress test
+  no longer dies at the 30-second mark.
+- **Fine-grained version compatibility.** Every method declares the
+  minimum Godot version it needs; on an older engine, only those specific
+  methods drop out of the catalog instead of the whole addon failing to
+  load.
+- **Structured error capture**, not UI scraping: runtime errors are
+  intercepted through Godot's debugger `debug_data` signal.
+- **Deterministic playtesting**: fixed RNG seed, fixed simulation tick,
+  state snapshots, frame-by-frame stepping (`step_frames`) or stepping
+  until a condition holds (`wait_for_condition`) — reproduce a bug instead
+  of hunting it blind.
+- **3D perception**: debug render modes (wireframe, overdraw, lighting
+  only…) on screenshots, overlapping/floating object detection, camera
+  frustum testing, light coverage — a spatial lint for what a single
+  screenshot won't show you.
+- **Built-in CC0 assets**: search, preview, and import directly from Poly
+  Haven and ambientCG without leaving the conversation.
 
 ## Setup
 
@@ -198,13 +299,14 @@ Add to your AI client config (`.mcp.json`, `claude.json`, `opencode.json`):
 
 | Tool | Description |
 |------|-------------|
-| `godot_call` | Call any method |
+| `godot_call` | Call any method in the catalog (`async: true` for long-running calls) |
 | `godot_list_methods` | List methods by category (live from the connected editor) |
 | `godot_describe` | Full schema (params, types, annotations) for one or more methods |
 | `godot_info` | Project info |
 | `godot_screenshot` | Editor screenshot in PNG |
 | `godot_execute` | Run GDScript |
-| `godot_status` | Check connection |
+| `godot_status` | Check connection, pin an editor (`select`) when several are connected |
+| `godot_job` | Poll the result of an `async: true` call |
 | `godot_doctor` | End-to-end diagnostic: port, connection, auth, addon/server contract, Godot binary |
 | `godot_assets` | Search/preview/import CC0 assets (Poly Haven, ambientCG) |
 
