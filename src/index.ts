@@ -366,6 +366,8 @@ async function runDoctor(): Promise<DoctorCheck[]> {
   return checks;
 }
 
+interface PeerInfo { projectPath: string; projectName: string; godotVersion: string }
+
 export class GodotBridge {
   private server: http.Server | null = null;
   private port = 0;
@@ -374,6 +376,8 @@ export class GodotBridge {
   private pending = new Map<number, Pending>();
   private authPending = new Set<number>();
   private nextId = 1;
+  private peerInfo = new Map<Duplex, PeerInfo>();
+  private activePeer: Duplex | null = null;
 
   // Auth outcome tracking for godot_doctor — previously an auth mismatch
   // (server has no token configured, or the editor rejected the one it got)
@@ -457,8 +461,12 @@ export class GodotBridge {
         this.bufs.set(socket, Buffer.alloc(0));
         this.invalidateSchemaCache();
         socket.on("data", (chunk) => this.onData(socket, chunk));
-        socket.on("close", () => { this.peers.delete(socket); this.bufs.delete(socket); });
-        socket.on("error", () => { this.peers.delete(socket); this.bufs.delete(socket); });
+        const forget = () => {
+          this.peers.delete(socket); this.bufs.delete(socket); this.peerInfo.delete(socket);
+          if (this.activePeer === socket) this.activePeer = null;
+        };
+        socket.on("close", forget);
+        socket.on("error", forget);
       });
       // Without this listener a busy port throws out of the event loop and
       // takes the whole MCP process down.
@@ -501,17 +509,48 @@ export class GodotBridge {
         `start Godot with the godot_mcp plugin enabled.`;
     }
     if (this.peers.size === 1) return `Connected to the Godot editor on port ${this.port}.`;
-    // ponytail: the protocol carries no project identity, so a second editor on
-    // this port gets reported rather than routed — a call could otherwise land
-    // in the wrong project with nothing to show for it. Upgrade: have the addon
-    // announce its project path on connect and select the peer by project.
-    return `${this.peers.size} Godot editors are connected on port ${this.port} — calls go to ` +
-      `whichever answered first. Close the editors you are not driving.`;
+    const peers = this.listPeers();
+    const lines = peers.map((p) =>
+      `  ${p.active ? "*" : " "} ${p.projectName || "(unidentified)"} — ${p.projectPath || "no project path reported"}`
+    );
+    return `${this.peers.size} Godot editors are connected on port ${this.port}:\n${lines.join("\n")}\n` +
+      (this.activePeer
+        ? `Calls go to the pinned editor (*).`
+        : `No editor pinned — calls go to whichever is first. Pin one with godot_status {"select":"<project name>"}.`);
+  }
+
+  /** The pinned peer if it's still connected, else any peer. */
+  private selectPeer(): Duplex {
+    if (this.activePeer && this.peers.has(this.activePeer)) return this.activePeer;
+    this.activePeer = null;
+    return this.peers.values().next().value as Duplex;
+  }
+
+  listPeers(): (PeerInfo & { active: boolean })[] {
+    return [...this.peers].map((sock) => ({
+      projectPath: "", projectName: "", godotVersion: "",
+      ...(this.peerInfo.get(sock) ?? {}),
+      active: sock === this.activePeer,
+    }));
+  }
+
+  /** Pin the editor whose project name or path contains `needle`. */
+  selectByProject(needle: string): boolean {
+    const lower = needle.toLowerCase();
+    for (const sock of this.peers) {
+      const info = this.peerInfo.get(sock);
+      if (!info) continue;
+      if (info.projectName.toLowerCase().includes(lower) || info.projectPath.toLowerCase().includes(lower)) {
+        this.activePeer = sock;
+        return true;
+      }
+    }
+    return false;
   }
 
   async call(method: string, params?: Record<string, unknown>): Promise<unknown> {
     if (!this.connected) throw new Error("Godot editor not connected — is the plugin enabled and Godot running?");
-    const peer = this.peers.values().next().value as Duplex;
+    const peer = this.selectPeer();
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -548,6 +587,19 @@ export class GodotBridge {
   private dispatch(socket: Duplex, text: string): void {
     let msg: Record<string, unknown>;
     try { msg = JSON.parse(text); } catch { return; }
+
+    if (msg.method === "hello") {
+      // Sent unconditionally by the addon on connect. Its absence is normal
+      // for an older addon build — those peers simply stay anonymous and the
+      // bridge behaves exactly as it did before.
+      const p = (msg.params ?? {}) as Record<string, unknown>;
+      this.peerInfo.set(socket, {
+        projectPath: String(p.project_path ?? ""),
+        projectName: String(p.project_name ?? ""),
+        godotVersion: String(p.godot_version ?? ""),
+      });
+      return;
+    }
 
     if (msg.method === "ping") {
       // Godot's own heartbeat (plugin/websocket_server.gd PING_INTERVAL) sends
@@ -681,9 +733,14 @@ export const TOOL_DEFS = [
   },
   {
     name: "godot_status",
-    description: "Check connection status to the Godot editor.",
-    inputSchema: { type: "object", properties: {} },
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: "Check connection status to the Godot editor. With 'select', pins which editor subsequent calls go to when several are connected.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        select: { type: "string", description: "Project name or path fragment of the editor to pin for subsequent calls" },
+      },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
     name: "godot_doctor",
@@ -1000,6 +1057,16 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       }
       case "godot_status": {
+        const select = args?.select as string | undefined;
+        if (select) {
+          if (!godot.selectByProject(select)) {
+            const names = godot.listPeers().map((p) => p.projectName || p.projectPath || "(unidentified)");
+            throw new Error(
+              `No connected editor matches "${select}". Connected: ${names.join(", ") || "none"}. ` +
+              `Editors running an addon build older than this server report no project identity and cannot be pinned.`
+            );
+          }
+        }
         return { content: [{ type: "text", text: godot.status }] };
       }
       case "godot_doctor": {

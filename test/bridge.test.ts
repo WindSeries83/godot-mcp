@@ -102,6 +102,74 @@ describe("GodotBridge.dispatch", () => {
   it("rejects call() immediately when no editor is connected", async () => {
     await expect(bridge.call("get_project_info")).rejects.toThrow(/not connected/);
   });
+
+  it("records project identity from a hello notification", () => {
+    const { socket } = fakeSocket();
+    (bridge as any).peers.add(socket);
+    (bridge as any).dispatch(socket, JSON.stringify({
+      jsonrpc: "2.0",
+      method: "hello",
+      params: { project_path: "/home/me/GameA", project_name: "GameA", godot_version: "4.5.0" },
+    }));
+    expect((bridge as any).peerInfo.get(socket)).toMatchObject({
+      projectPath: "/home/me/GameA",
+      projectName: "GameA",
+    });
+  });
+
+  it("routes to the pinned peer instead of the first one added", () => {
+    const a = fakeSocket();
+    const b = fakeSocket();
+    (bridge as any).peers.add(a.socket);
+    (bridge as any).peers.add(b.socket);
+    (bridge as any).dispatch(a.socket, JSON.stringify({
+      jsonrpc: "2.0", method: "hello",
+      params: { project_path: "/p/GameA", project_name: "GameA", godot_version: "4.5.0" },
+    }));
+    (bridge as any).dispatch(b.socket, JSON.stringify({
+      jsonrpc: "2.0", method: "hello",
+      params: { project_path: "/p/GameB", project_name: "GameB", godot_version: "4.5.0" },
+    }));
+
+    expect(bridge.selectByProject("GameB")).toBe(true);
+    void bridge.call("get_project_info");
+    // Socket A was added first, so without pinning it would have received it.
+    expect(a.frames()).toHaveLength(0);
+    expect(b.frames()).toHaveLength(1);
+  });
+
+  it("falls back to any live peer when the pinned one disconnects", () => {
+    const a = fakeSocket();
+    const b = fakeSocket();
+    (bridge as any).peers.add(a.socket);
+    (bridge as any).peers.add(b.socket);
+    (bridge as any).dispatch(b.socket, JSON.stringify({
+      jsonrpc: "2.0", method: "hello",
+      params: { project_path: "/p/GameB", project_name: "GameB", godot_version: "4.5.0" },
+    }));
+    expect(bridge.selectByProject("GameB")).toBe(true);
+
+    // B drops off exactly as the socket close handler would leave things.
+    (bridge as any).peers.delete(b.socket);
+    (bridge as any).peerInfo.delete(b.socket);
+
+    void bridge.call("get_project_info");
+    expect(a.frames()).toHaveLength(1);
+  });
+
+  it("reports unknown projects rather than silently pinning nothing", () => {
+    const { socket } = fakeSocket();
+    (bridge as any).peers.add(socket);
+    expect(bridge.selectByProject("NoSuchProject")).toBe(false);
+  });
+
+  it("still works with an addon that never sends hello", () => {
+    const { socket, frames } = fakeSocket();
+    (bridge as any).peers.add(socket);
+    void bridge.call("get_project_info");
+    expect(frames()).toHaveLength(1);
+    expect((bridge as any).peerInfo.size).toBe(0);
+  });
 });
 
 describe("GodotBridge schema caching", () => {

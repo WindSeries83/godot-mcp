@@ -145,6 +145,20 @@ func _process(delta: float) -> void:
 					# whole mechanism is inert for existing setups.
 					_authed[p] = _auth_token.is_empty()
 					_auth_timers[p] = 0.0
+					# Announce project identity so a server talking to several
+					# editors can route calls to the right one instead of
+					# whichever peer happens to be first in its set. Sent
+					# unconditionally: an older server ignores unknown
+					# notifications, so this is safe in both directions.
+					ws.send_text(JSON.stringify({
+						"jsonrpc": "2.0",
+						"method": "hello",
+						"params": {
+							"project_path": ProjectSettings.globalize_path("res://"),
+							"project_name": str(ProjectSettings.get_setting("application/config/name", "")),
+							"godot_version": str(Engine.get_version_info().get("string", "")),
+						},
+					}))
 					if not _authed[p]:
 						ws.send_text(JSON.stringify({
 							"jsonrpc": "2.0",
