@@ -23,6 +23,17 @@ const WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const BASE_PORT = parseInt(process.env.GODOT_MCP_PORT ?? "6505", 10);
 const ALL_PORTS = Array.from({ length: 10 }, (_, i) => BASE_PORT + i);
 const REQUEST_TIMEOUT = 30_000;
+// Long enough for the longest thing the addon will do (run_stress_test caps
+// duration at 60s) plus slack, without being unbounded.
+const JOB_TIMEOUT = 300_000;
+
+interface JobRecord {
+  status: "running" | "done" | "error";
+  method: string;
+  started: number;
+  result?: unknown;
+  error?: string;
+}
 
 // Opt-in connection token (see SECURITY.md / godot_mcp/require_connection_token).
 // The Godot side writes the token to user://mcp_auth_token, a path this
@@ -548,18 +559,38 @@ export class GodotBridge {
     return false;
   }
 
-  async call(method: string, params?: Record<string, unknown>): Promise<unknown> {
+  async call(method: string, params?: Record<string, unknown>, timeoutMs = REQUEST_TIMEOUT): Promise<unknown> {
     if (!this.connected) throw new Error("Godot editor not connected — is the plugin enabled and Godot running?");
     const peer = this.selectPeer();
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`Request "${method}" timed out after ${REQUEST_TIMEOUT / 1000}s`));
-      }, REQUEST_TIMEOUT);
+        reject(new Error(`Request "${method}" timed out after ${timeoutMs / 1000}s`));
+      }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       wsSend(peer, JSON.stringify({ jsonrpc: "2.0", id, method, params: params ?? {} }));
     });
+  }
+
+  // ponytail: in-memory only, lost on server restart. A job can't outlive the
+  // session that started it anyway, so persisting it would buy nothing.
+  private jobs = new Map<string, JobRecord>();
+  private nextJobId = 1;
+
+  startJob(method: string, params: Record<string, unknown>): string {
+    const id = `job-${this.nextJobId++}`;
+    this.jobs.set(id, { status: "running", method, started: Date.now() });
+    // Deliberately not awaited: the point is to return the handle now.
+    this.call(method, params, JOB_TIMEOUT).then(
+      (result) => this.jobs.set(id, { ...this.jobs.get(id)!, status: "done", result }),
+      (err: Error) => this.jobs.set(id, { ...this.jobs.get(id)!, status: "error", error: err.message }),
+    );
+    return id;
+  }
+
+  getJob(id: string): JobRecord | undefined {
+    return this.jobs.get(id);
   }
 
   private onData(socket: Duplex, chunk: Buffer): void {
@@ -676,6 +707,7 @@ export const TOOL_DEFS = [
       properties: {
         method: { type: "string", description: "Method name, e.g. get_project_info, get_scene_tree, add_node" },
         params: { type: "object", description: "Parameters for the method (varies per method)" },
+        async: { type: "boolean", description: "Return a job_id immediately instead of blocking. Use for long operations (run_stress_test, run_test_scenario, bake_navigation_mesh, headless commands) which otherwise exceed the 30s request timeout. Poll the result with godot_job." },
       },
       required: ["method"],
     },
@@ -741,6 +773,16 @@ export const TOOL_DEFS = [
       },
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: "godot_job",
+    description: "Check an async job started by godot_call with async:true. Returns its status and, once finished, its result or error.",
+    inputSchema: {
+      type: "object",
+      properties: { job_id: { type: "string", description: "The job_id returned by godot_call" } },
+      required: ["job_id"],
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
     name: "godot_doctor",
@@ -1011,6 +1053,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           }
         }
 
+        if (args?.async) {
+          const jobId = godot.startJob(method, params);
+          return { content: [{ type: "text", text: JSON.stringify({ job_id: jobId, status: "running", method }, null, 2) }] };
+        }
         const result = await godot.call(method, params);
         return { content: [{ type: "text", text: truncateOutput(JSON.stringify(result, null, 2)) }] };
       }
@@ -1068,6 +1114,20 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           }
         }
         return { content: [{ type: "text", text: godot.status }] };
+      }
+      case "godot_job": {
+        const jobId = args?.job_id as string;
+        if (!jobId) throw new Error("job_id is required");
+        const job = godot.getJob(jobId);
+        if (!job) throw new Error(`Unknown job "${jobId}". Jobs live in memory and are lost if the server restarts.`);
+        return { content: [{ type: "text", text: truncateOutput(JSON.stringify({
+          job_id: jobId,
+          status: job.status,
+          method: job.method,
+          elapsed_ms: Date.now() - job.started,
+          ...(job.result !== undefined ? { result: job.result } : {}),
+          ...(job.error !== undefined ? { error: job.error } : {}),
+        }, null, 2)) }] };
       }
       case "godot_doctor": {
         const checks = await runDoctor();
