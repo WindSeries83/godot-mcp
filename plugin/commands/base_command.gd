@@ -468,6 +468,28 @@ func guard_overwrite(path: String, overwrite: bool) -> Dictionary:
 	)
 
 
+## Refuses a write when the caller's expected hash doesn't match the file's
+## current one — the file changed since they read it, so writing would destroy
+## whatever landed in between. An empty expected_sha means the caller opted
+## out, which is what keeps every existing caller working unchanged.
+## Mirrors guard_overwrite: {} means "go ahead", non-empty means "stop".
+func guard_stale_write(path: String, expected_sha: String) -> Dictionary:
+	if expected_sha.is_empty():
+		return {}
+	var current := FileAccess.get_sha256(path)
+	if current == expected_sha:
+		return {}
+	return error_conflict(
+		"File '%s' changed on disk since it was read (sha256 mismatch)" % path,
+		{
+			"path": path,
+			"expected_sha256": expected_sha,
+			"current_sha256": current,
+			"suggestion": "Someone else edited this file. Re-read it with read_script, re-apply your change to the new content, then retry with the sha256 that read returned.",
+		}
+	)
+
+
 func mark_current_scene_unsaved() -> void:
 	if EditorInterface.has_method("mark_scene_as_unsaved"):
 		EditorInterface.mark_scene_as_unsaved()

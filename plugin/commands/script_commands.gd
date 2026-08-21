@@ -11,6 +11,7 @@ func get_commands() -> Dictionary:
 		"attach_script": _attach_script,
 		"get_open_scripts": _get_open_scripts,
 		"validate_script": _validate_script,
+		"get_script_sha": _get_script_sha,
 	}
 
 
@@ -55,6 +56,7 @@ func get_command_schemas() -> Dictionary:
 				"insert_at_line": {"type": "int", "required": false, "desc": "0-based line index to insert text before; used with text"},
 				"text": {"type": "string", "required": false, "desc": "Text to insert at insert_at_line"},
 				"force": {"type": "bool", "required": false, "default": false, "desc": "Bypass the offline text-resource write guard"},
+				"expect_sha256": {"type": "string", "required": false, "default": "", "desc": "If given, the edit is refused unless the file's current sha256 matches — prevents silently overwriting a change made since you read it. Get it from read_script or get_script_sha."},
 			},
 			"annotations": {"readOnly": false, "destructive": true, "idempotent": true, "confirm": true},
 		},
@@ -77,6 +79,14 @@ func get_command_schemas() -> Dictionary:
 			"category": "script",
 			"summary": "Compile a GDScript file (cache bypassed) and report whether it parses. Result can be indeterminate if the script has live instances the editor is using.",
 			"params": {"path": {"type": "string", "required": true, "desc": "res:// path; must end in .gd or .cs"}},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"get_script_sha": {
+			"category": "script",
+			"summary": "SHA-256, size and modification time of a script, WITHOUT returning its contents. Cheap way to check whether a file you read earlier has changed since — pass the result to edit_script's expect_sha256 to make an edit refuse rather than overwrite someone else's change.",
+			"params": {
+				"path": {"type": "string", "required": true, "desc": "res:// path; must end in .gd or .cs"},
+			},
 			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
 		},
 	}
@@ -167,6 +177,26 @@ func _read_script(params: Dictionary) -> Dictionary:
 		"content": content,
 		"line_count": line_count,
 		"size": content.length(),
+		"sha256": FileAccess.get_sha256(path),
+	})
+
+
+func _get_script_sha(params: Dictionary) -> Dictionary:
+	var result := require_string(params, "path")
+	if result[1] != null:
+		return result[1]
+	var path: String = result[0]
+	var path_guard := _guard_script_file_path(path, "get_script_sha")
+	if not path_guard.is_empty():
+		return path_guard
+	if not FileAccess.file_exists(path):
+		return error_not_found("Script '%s'" % path)
+
+	return success({
+		"path": path,
+		"sha256": FileAccess.get_sha256(path),
+		"size": FileAccess.get_file_as_bytes(path).size(),
+		"modified_time": FileAccess.get_modified_time(path),
 	})
 
 
@@ -240,6 +270,10 @@ func _edit_script(params: Dictionary) -> Dictionary:
 	var guard := guard_text_resource_write(path, force)
 	if not guard.is_empty():
 		return guard
+
+	var stale_guard := guard_stale_write(path, optional_string(params, "expect_sha256", ""))
+	if not stale_guard.is_empty():
+		return stale_guard
 
 	# Read current content
 	var file := FileAccess.open(path, FileAccess.READ)

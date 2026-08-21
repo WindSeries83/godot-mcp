@@ -47,6 +47,7 @@ func _init() -> void:
 	if _require_loaded("plugin/commands/base_command.gd", BaseCommand):
 		_test_is_safe_scene_path(BaseCommand)
 		_test_guard_overwrite(BaseCommand)
+		_test_guard_stale_write(BaseCommand)
 	if _require_loaded("plugin/command_router.gd", CommandRouter):
 		_test_requires_confirm(CommandRouter)
 
@@ -216,6 +217,56 @@ func _test_guard_overwrite(BaseCommand: Script) -> void:
 		"an existing file with overwrite:true is allowed",
 		cmd.guard_overwrite(existing_path, true).has("error"),
 		false
+	)
+
+	DirAccess.remove_absolute(abs_path)
+	cmd.free()
+
+
+func _test_guard_stale_write(BaseCommand: Script) -> void:
+	var cmd: Object = BaseCommand.new()
+	var path := "user://mcp_stale_test.gd"
+	var abs_path := ProjectSettings.globalize_path(path)
+
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	f.store_string("extends Node\n")
+	f.close()
+
+	var real_sha := FileAccess.get_sha256(path)
+
+	_check(
+		"empty expected sha opts out of the check entirely",
+		cmd.guard_stale_write(path, "").has("error"),
+		false
+	)
+	_check(
+		"matching sha allows the write",
+		cmd.guard_stale_write(path, real_sha).has("error"),
+		false
+	)
+	_check(
+		"mismatched sha blocks the write",
+		cmd.guard_stale_write(path, "not-the-real-hash").has("error"),
+		true
+	)
+
+	# The refusal must carry the CURRENT hash, or the caller has no way to
+	# recover without a second round trip.
+	var blocked: Dictionary = cmd.guard_stale_write(path, "not-the-real-hash")
+	_check(
+		"refusal reports the current sha so the caller can retry",
+		blocked.get("error", {}).get("data", {}).get("current_sha256", ""),
+		real_sha
+	)
+
+	# A file edited after the hash was taken must now be refused.
+	var f2 := FileAccess.open(path, FileAccess.WRITE)
+	f2.store_string("extends Node\nfunc _ready() -> void:\n\tpass\n")
+	f2.close()
+	_check(
+		"a sha taken before an external edit is now stale",
+		cmd.guard_stale_write(path, real_sha).has("error"),
+		true
 	)
 
 	DirAccess.remove_absolute(abs_path)
