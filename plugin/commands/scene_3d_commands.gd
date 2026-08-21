@@ -26,6 +26,9 @@ func get_commands() -> Dictionary:
 		"get_skeleton_info": _get_skeleton_info,
 		"set_bone_pose": _set_bone_pose,
 		"attach_to_bone": _attach_to_bone,
+		"spatial_sanity_check": _spatial_sanity_check,
+		"get_camera_view": _get_camera_view,
+		"get_light_coverage": _get_light_coverage,
 	}
 
 
@@ -318,6 +321,33 @@ func get_command_schemas() -> Dictionary:
 				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to the node to reparent under the new BoneAttachment3D"},
 			},
 			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"spatial_sanity_check": {
+			"category": "3d",
+			"summary": "Lint pass over the edited scene's 3D geometry, catching what a human would notice at a glance in the viewport but an agent can't see in an AABB or a screenshot alone: overlapping props, floating objects, wildly-off-scale objects (the classic imported-model-in-the-wrong-units bug), nodes stuck at the exact origin, zero/negative scale, per-node triangle counts, and MeshInstance3D nodes with no collision shape. Operates on VisualInstance3D nodes (their own geometry, not merged with descendants), capped at max_nodes for performance on large scenes.",
+			"params": {
+				"max_nodes": {"type": "int", "required": false, "default": 200, "desc": "Cap on VisualInstance3D nodes examined; pairwise checks (overlap, floating) are O(n^2), clamped 1-500"},
+				"scale_outlier_factor": {"type": "float", "required": false, "default": 20.0, "desc": "Flag a node whose AABB diagonal is more than this many times (or less than 1/this many times) the scene's median as scale-aberrant"},
+				"float_threshold": {"type": "float", "required": false, "default": 0.5, "desc": "Minimum gap in world units between an object's bottom and whatever's below it to flag as floating"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"get_camera_view": {
+			"category": "3d",
+			"summary": "Which nodes are actually inside a Camera3D's view frustum right now — a list of names to reason about instead of an image to interpret. Tests both the AABB center and its 8 corners, since a large object whose center is off-frame can still fill the screen.",
+			"params": {
+				"camera_path": {"type": "string", "required": false, "default": "", "desc": "Scene-relative path to a Camera3D; defaults to the scene's active/current Camera3D"},
+				"max_nodes": {"type": "int", "required": false, "default": 200, "desc": "Cap on VisualInstance3D nodes examined, clamped 1-500"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"get_light_coverage": {
+			"category": "3d",
+			"summary": "Which nodes are within range of at least one light in the scene — diagnoses 'why is my scene black' without a render. Geometric range only (DirectionalLight3D covers everything visible; Omni/SpotLight3D by distance vs. their range), not an actual shadow/occlusion computation, so a node can be reported covered while still sitting in another object's shadow.",
+			"params": {
+				"max_nodes": {"type": "int", "required": false, "default": 200, "desc": "Cap on VisualInstance3D nodes examined, clamped 1-500"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
 		},
 	}
 
@@ -1927,4 +1957,347 @@ func _attach_to_bone(params: Dictionary) -> Dictionary:
 		"attachment_node_path": str(root.get_path_to(attachment)),
 		"node_path": str(root.get_path_to(target)),
 		"bone": bone_name,
+	})
+
+
+## ─── spatial_sanity_check / get_camera_view / get_light_coverage ───────────
+
+## Recursively collects VisualInstance3D descendants of `node` (each node's
+## own geometry, not merged with children — a compound prop's parts are
+## examined individually), stopping once `out` reaches max_nodes. The caller
+## checks out.size() >= max_nodes afterward to know whether the scene was
+## truncated rather than fully examined.
+func _collect_visual_instances(node: Node, max_nodes: int, out: Array) -> void:
+	if out.size() >= max_nodes:
+		return
+	if node is VisualInstance3D:
+		out.append(node)
+	for child in node.get_children():
+		if out.size() >= max_nodes:
+			return
+		_collect_visual_instances(child, max_nodes, out)
+
+
+func _is_ancestor_of(maybe_ancestor: Node, node: Node) -> bool:
+	var p := node.get_parent()
+	while p != null:
+		if p == maybe_ancestor:
+			return true
+		p = p.get_parent()
+	return false
+
+
+## ponytail: overlap/floating checks are O(n^2) over the collected node list,
+## bounded by max_nodes (clamped to 500) rather than an octree. Sibling parts
+## of one compound prop (e.g. a character's body and hat as separate
+## MeshInstance3D children) are not ancestor/descendant of each other and
+## will be reported as "overlapping" like any other pair — upgrade if that
+## proves noisy: group by a shared non-VisualInstance3D ancestor first.
+func _spatial_sanity_check(params: Dictionary) -> Dictionary:
+	var root := get_edited_root()
+	if root == null:
+		return error_no_scene()
+
+	var max_nodes: int = clampi(optional_int(params, "max_nodes", 200), 1, 500)
+	var scale_outlier_factor: float = maxf(optional_float(params, "scale_outlier_factor", 20.0), 1.01)
+	var float_threshold: float = maxf(optional_float(params, "float_threshold", 0.5), 0.0)
+
+	var nodes: Array = []
+	_collect_visual_instances(root, max_nodes, nodes)
+	var truncated: bool = nodes.size() >= max_nodes
+
+	var items: Array[Dictionary] = []
+	for n in nodes:
+		var vi: VisualInstance3D = n
+		var world_aabb: AABB = vi.global_transform * vi.get_aabb()
+		items.append({
+			"node": vi,
+			"path": str(root.get_path_to(vi)),
+			"aabb": world_aabb,
+			"diagonal": world_aabb.size.length(),
+		})
+
+	var issues: Array = []
+
+	for item in items:
+		var vi: VisualInstance3D = item["node"]
+		if vi == root:
+			continue
+		if (vi as Node3D).global_position.is_equal_approx(Vector3.ZERO):
+			issues.append({
+				"severity": "warning",
+				"message": "'%s' sits at the exact world origin (0,0,0) — likely a placement that was never actually applied." % item["path"],
+			})
+		var s: Vector3 = (vi as Node3D).scale
+		if s.x <= 0.0 or s.y <= 0.0 or s.z <= 0.0:
+			issues.append({
+				"severity": "warning",
+				"message": "'%s' has scale (%.3f, %.3f, %.3f) — zero or negative scale makes it invisible or inverted." % [item["path"], s.x, s.y, s.z],
+			})
+
+	var diagonals: Array = []
+	for item in items:
+		var d: float = item["diagonal"]
+		if d > 0.0:
+			diagonals.append(d)
+	if diagonals.size() >= 3:
+		diagonals.sort()
+		var median: float = diagonals[diagonals.size() / 2]
+		if median > 0.0:
+			for item in items:
+				var d2: float = item["diagonal"]
+				if d2 <= 0.0:
+					continue
+				var ratio: float = d2 / median
+				if ratio >= scale_outlier_factor or ratio <= 1.0 / scale_outlier_factor:
+					issues.append({
+						"severity": "warning",
+						"message": "'%s' bounds diagonal is %.2f units vs. a scene median of %.2f (%.1fx) — check for an imported-model units mismatch." % [item["path"], d2, median, ratio],
+					})
+
+	var total_triangles: int = 0
+	var triangle_counts: Dictionary = {}
+	for item in items:
+		var vi: VisualInstance3D = item["node"]
+		if not (vi is MeshInstance3D):
+			continue
+		var mesh: Mesh = (vi as MeshInstance3D).mesh
+		if mesh == null or not (mesh is ArrayMesh):
+			continue
+		var am: ArrayMesh = mesh
+		var tris: int = 0
+		for surf in am.get_surface_count():
+			var idx_len: int = am.surface_get_array_index_len(surf)
+			tris += (idx_len / 3) if idx_len > 0 else (am.surface_get_array_len(surf) / 3)
+		if tris > 0:
+			triangle_counts[item["path"]] = tris
+			total_triangles += tris
+
+	for item in items:
+		var vi: VisualInstance3D = item["node"]
+		if not (vi is MeshInstance3D):
+			continue
+		var has_collision := false
+		var parent := vi.get_parent()
+		var siblings: Array = parent.get_children() if parent != null else []
+		for sibling in siblings:
+			if sibling is CollisionShape3D or sibling is CollisionPolygon3D:
+				has_collision = true
+				break
+		if not has_collision:
+			for child in vi.get_children():
+				if child is CollisionShape3D or child is CollisionPolygon3D:
+					has_collision = true
+					break
+		if not has_collision:
+			issues.append({
+				"severity": "info",
+				"message": "'%s' is a MeshInstance3D with no CollisionShape3D sibling or child — objects will not physically collide with it." % item["path"],
+			})
+
+	for i in items.size():
+		var a: Dictionary = items[i]
+		var a_node: Node = a["node"]
+		var a_box: AABB = a["aabb"]
+		var a_rect := Rect2(a_box.position.x, a_box.position.z, a_box.size.x, a_box.size.z)
+		var support_y: float = -INF
+		var has_support := false
+		for j in items.size():
+			if i == j:
+				continue
+			var b: Dictionary = items[j]
+			var b_node: Node = b["node"]
+			if _is_ancestor_of(a_node, b_node) or _is_ancestor_of(b_node, a_node):
+				continue
+			var b_box: AABB = b["aabb"]
+			if i < j and a_box.intersects(b_box):
+				issues.append({
+					"severity": "warning",
+					"message": "'%s' and '%s' overlap in world space." % [a["path"], b["path"]],
+				})
+			var b_rect := Rect2(b_box.position.x, b_box.position.z, b_box.size.x, b_box.size.z)
+			if a_rect.intersects(b_rect):
+				var b_top: float = b_box.position.y + b_box.size.y
+				if b_top <= a_box.position.y and b_top > support_y:
+					support_y = b_top
+					has_support = true
+		if has_support:
+			var gap: float = a_box.position.y - support_y
+			if gap > float_threshold:
+				issues.append({
+					"severity": "info",
+					"message": "'%s' floats %.2f units above the nearest object below it." % [a["path"], gap],
+				})
+
+	return success({
+		"nodes_examined": items.size(),
+		"truncated": truncated,
+		"total_triangles": total_triangles,
+		"triangle_counts": triangle_counts,
+		"issues": issues,
+		"issue_count": issues.size(),
+	})
+
+
+func _find_camera(node: Node, require_current: bool) -> Camera3D:
+	if node is Camera3D and (not require_current or (node as Camera3D).current):
+		return node
+	for child in node.get_children():
+		var found := _find_camera(child, require_current)
+		if found != null:
+			return found
+	return null
+
+
+func _find_active_camera(root: Node) -> Camera3D:
+	var current := _find_camera(root, true)
+	if current != null:
+		return current
+	return _find_camera(root, false)
+
+
+func _get_camera_view(params: Dictionary) -> Dictionary:
+	var root := get_edited_root()
+	if root == null:
+		return error_no_scene()
+
+	var camera: Camera3D = null
+	var camera_path: String = optional_string(params, "camera_path", "")
+	if not camera_path.is_empty():
+		var found := find_node_by_path(camera_path)
+		if found == null:
+			return error_not_found("Node '%s'" % camera_path)
+		if not (found is Camera3D):
+			return error_invalid_params("Node '%s' is a %s, not a Camera3D" % [camera_path, found.get_class()])
+		camera = found
+	else:
+		camera = _find_active_camera(root)
+		if camera == null:
+			return error(-32000, "No Camera3D found in the scene", {
+				"suggestion": "Pass camera_path explicitly, or add a Camera3D to the scene",
+			})
+
+	var max_nodes: int = clampi(optional_int(params, "max_nodes", 200), 1, 500)
+	var nodes: Array = []
+	_collect_visual_instances(root, max_nodes, nodes)
+	var truncated: bool = nodes.size() >= max_nodes
+
+	var visible_list: Array = []
+	var behind_list: Array = []
+	var outside_list: Array = []
+
+	for n in nodes:
+		var vi: VisualInstance3D = n
+		if vi == camera:
+			continue
+		var world_aabb: AABB = vi.global_transform * vi.get_aabb()
+		var points: Array = [world_aabb.get_center()]
+		for corner_idx in 8:
+			points.append(world_aabb.get_endpoint(corner_idx))
+
+		var any_in_frustum := false
+		var any_behind := false
+		for p in points:
+			if camera.is_position_in_frustum(p):
+				any_in_frustum = true
+				break
+			if camera.is_position_behind(p):
+				any_behind = true
+
+		var path := str(root.get_path_to(vi))
+		if any_in_frustum:
+			visible_list.append(path)
+		elif any_behind:
+			behind_list.append(path)
+		else:
+			outside_list.append(path)
+
+	return success({
+		"camera_path": str(root.get_path_to(camera)),
+		"nodes_examined": nodes.size(),
+		"truncated": truncated,
+		"visible": visible_list,
+		"behind_camera": behind_list,
+		"outside_frustum": outside_list,
+	})
+
+
+func _collect_lights(node: Node, out: Array) -> void:
+	if node is Light3D:
+		out.append(node)
+	for child in node.get_children():
+		_collect_lights(child, out)
+
+
+## Geometric proxy, not real lighting: DirectionalLight3D "covers" everything
+## visible; Omni/SpotLight3D by straight-line distance vs. their range, with
+## no occlusion check — a node behind a wall from its nearest light still
+## counts as covered. Good enough to answer "is there even a light near this"
+## without a render; not good enough to predict actual shadow falloff.
+func _get_light_coverage(params: Dictionary) -> Dictionary:
+	var root := get_edited_root()
+	if root == null:
+		return error_no_scene()
+
+	var max_nodes: int = clampi(optional_int(params, "max_nodes", 200), 1, 500)
+	var nodes: Array = []
+	_collect_visual_instances(root, max_nodes, nodes)
+	var truncated: bool = nodes.size() >= max_nodes
+
+	var lights: Array = []
+	_collect_lights(root, lights)
+
+	if lights.is_empty():
+		var uncovered_all: Array = []
+		for n in nodes:
+			uncovered_all.append(str(root.get_path_to(n)))
+		return success({
+			"nodes_examined": nodes.size(),
+			"truncated": truncated,
+			"light_count": 0,
+			"covered": [],
+			"uncovered": uncovered_all,
+			"warning": "No lights found in the scene — everything will render black or fall back to the environment's ambient light.",
+		})
+
+	var has_directional := false
+	for l in lights:
+		if l is DirectionalLight3D and (l as Light3D).visible:
+			has_directional = true
+			break
+
+	var covered: Array = []
+	var uncovered: Array = []
+
+	for n in nodes:
+		var vi: VisualInstance3D = n
+		if not (vi as Node3D).visible:
+			continue
+		var world_center: Vector3 = (vi.global_transform * vi.get_aabb()).get_center()
+		var lit := has_directional
+		if not lit:
+			for l in lights:
+				var light: Light3D = l
+				if not light.visible:
+					continue
+				var light_node: Node3D = light
+				var dist: float = world_center.distance_to(light_node.global_position)
+				if light is OmniLight3D and dist <= (light as OmniLight3D).omni_range:
+					lit = true
+					break
+				elif light is SpotLight3D and dist <= (light as SpotLight3D).spot_range:
+					lit = true
+					break
+		var path := str(root.get_path_to(vi))
+		if lit:
+			covered.append(path)
+		else:
+			uncovered.append(path)
+
+	return success({
+		"nodes_examined": nodes.size(),
+		"truncated": truncated,
+		"light_count": lights.size(),
+		"covered": covered,
+		"uncovered": uncovered,
 	})
