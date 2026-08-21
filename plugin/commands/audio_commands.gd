@@ -10,6 +10,7 @@ func get_commands() -> Dictionary:
 		"add_audio_bus_effect": _add_audio_bus_effect,
 		"add_audio_player": _add_audio_player,
 		"get_audio_info": _get_audio_info,
+		"describe_audio": _describe_audio,
 	}
 
 
@@ -82,6 +83,14 @@ func get_command_schemas() -> Dictionary:
 			"summary": "Recursively lists AudioStreamPlayer/2D/3D nodes under a node with their playback properties.",
 			"params": {
 				"node_path": {"type": "string", "required": true, "desc": "Path to the node to search from"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"describe_audio": {
+			"category": "audio",
+			"summary": "Duration and format info for an audio file, loaded as a resource (not a scene node). For AudioStreamWAV, also reports mix rate, channel count, and sample format.",
+			"params": {
+				"path": {"type": "string", "required": true, "desc": "res:// path to an audio resource (.wav/.ogg/.mp3)"},
 			},
 			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
 		},
@@ -504,3 +513,32 @@ func _collect_audio_players(node: Node, result: Array[Dictionary]) -> void:
 
 	for child in node.get_children():
 		_collect_audio_players(child, result)
+
+
+func _describe_audio(params: Dictionary) -> Dictionary:
+	var result := require_string(params, "path")
+	if result[1] != null:
+		return result[1]
+	var path: String = result[0]
+
+	if not FileAccess.file_exists(path):
+		return error_not_found("Resource '%s'" % path)
+
+	var stream: Resource = ResourceLoader.load(path)
+	if stream == null:
+		return error_internal("Failed to load resource: %s" % path)
+	if not stream is AudioStream:
+		return error_invalid_params("Resource type '%s' is not an AudioStream" % stream.get_class())
+
+	var info := {
+		"path": path,
+		"type": stream.get_class(),
+		"length_sec": (stream as AudioStream).get_length(),
+	}
+	if stream is AudioStreamWAV:
+		var wav := stream as AudioStreamWAV
+		info["mix_rate"] = wav.mix_rate
+		info["channels"] = 2 if wav.stereo else 1
+		info["format"] = wav.format
+
+	return success(info)
