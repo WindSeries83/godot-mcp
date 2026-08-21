@@ -176,6 +176,7 @@ func get_command_schemas() -> Dictionary:
 				"elevation_degrees": {"type": "float", "required": false, "default": 25.0, "desc": "Camera elevation above the horizontal plane"},
 				"padding": {"type": "float", "required": false, "default": 1.4, "desc": "Framing margin multiplier around the bounds, clamped 1.0-5.0"},
 				"thumb_size": {"type": "int", "required": false, "default": 384, "desc": "Width/height in pixels of each view before tiling, clamped 64-1024"},
+				"debug_draw": {"type": "string", "required": false, "default": "normal", "desc": "Viewport render mode for the capture: normal, wireframe (topology), unshaded (geometry without lighting), lighting (lighting only, no textures), overdraw (transparency stacking), normal_buffer. Restored to the viewport's actual setting afterward."},
 				"save_path": {"type": "string", "required": false, "default": "", "desc": "If given, save the composed sheet here (res://, user://, or absolute) instead of returning base64"},
 				"overwrite": {"type": "bool", "required": false, "default": false, "desc": "Overwrite an existing file at save_path"},
 			},
@@ -190,6 +191,7 @@ func get_command_schemas() -> Dictionary:
 				"elevation_degrees": {"type": "float", "required": false, "default": 25.0, "desc": "Camera elevation above the horizontal plane"},
 				"padding": {"type": "float", "required": false, "default": 1.4, "desc": "Framing margin multiplier around the bounds, clamped 1.0-5.0"},
 				"thumb_size": {"type": "int", "required": false, "default": 512, "desc": "Width/height in pixels of the captured image, clamped 64-2048"},
+				"debug_draw": {"type": "string", "required": false, "default": "normal", "desc": "Viewport render mode for the capture: normal, wireframe, unshaded, lighting, overdraw, normal_buffer. Restored to the viewport's actual setting afterward."},
 				"save_path": {"type": "string", "required": false, "default": "", "desc": "If given, save the PNG here (res://, user://, or absolute) instead of returning base64"},
 				"overwrite": {"type": "bool", "required": false, "default": false, "desc": "Overwrite an existing file at save_path"},
 			},
@@ -359,6 +361,28 @@ func _parse_vector3_param(params: Dictionary, key: String, default: Vector3) -> 
 	if val is Array and val.size() >= 3:
 		return Vector3(float(val[0]), float(val[1]), float(val[2]))
 	return default
+
+
+## Named subset of Viewport.DebugDraw useful for inspecting geometry from an
+## agent's screenshot tools — the rest of the 27 engine modes are Forward+
+## GI/cluster debug views with nothing to offer here. "normal" means the
+## default renderer (DEBUG_DRAW_DISABLED), not "no change".
+const _DEBUG_DRAW_MODES := {
+	"normal": Viewport.DEBUG_DRAW_DISABLED,
+	"unshaded": Viewport.DEBUG_DRAW_UNSHADED,
+	"lighting": Viewport.DEBUG_DRAW_LIGHTING,
+	"overdraw": Viewport.DEBUG_DRAW_OVERDRAW,
+	"wireframe": Viewport.DEBUG_DRAW_WIREFRAME,
+	"normal_buffer": Viewport.DEBUG_DRAW_NORMAL_BUFFER,
+}
+
+
+func _resolve_debug_draw_mode(name: String) -> Dictionary:
+	if not _DEBUG_DRAW_MODES.has(name):
+		return {"error": error_invalid_params(
+			"Unknown debug_draw '%s'. Valid values: %s" % [name, ", ".join(_DEBUG_DRAW_MODES.keys())]
+		)}
+	return {"value": _DEBUG_DRAW_MODES[name]}
 
 
 ## ─── 1. add_mesh_instance ──────────────────────────────────────────────────
@@ -1105,6 +1129,9 @@ func _turntable_screenshot(params: Dictionary) -> Dictionary:
 	var elevation_degrees: float = optional_float(params, "elevation_degrees", 25.0)
 	var padding: float = clampf(optional_float(params, "padding", 1.4), 1.0, 5.0)
 	var thumb_size: int = clampi(optional_int(params, "thumb_size", 384), 64, 1024)
+	var debug_draw_result := _resolve_debug_draw_mode(optional_string(params, "debug_draw", "normal"))
+	if debug_draw_result.has("error"):
+		return debug_draw_result["error"]
 
 	var aabb: Variant = _world_aabb_of(node, true)
 	if aabb == null:
@@ -1124,6 +1151,8 @@ func _turntable_screenshot(params: Dictionary) -> Dictionary:
 
 	var orig_transform := cam.global_transform
 	var orig_fov := cam.fov
+	var orig_debug_draw := vp3d.debug_draw
+	vp3d.debug_draw = debug_draw_result["value"]
 	var fov := 50.0
 	var distance: float = radius * padding / sin(deg_to_rad(fov * 0.5))
 	cam.fov = fov
@@ -1154,6 +1183,7 @@ func _turntable_screenshot(params: Dictionary) -> Dictionary:
 		if image == null:
 			cam.global_transform = orig_transform
 			cam.fov = orig_fov
+			vp3d.debug_draw = orig_debug_draw
 			return error_internal("Could not capture a frame for view %d of %d" % [i + 1, views])
 
 		image.resize(thumb_size, thumb_size, Image.INTERPOLATE_LANCZOS)
@@ -1164,6 +1194,7 @@ func _turntable_screenshot(params: Dictionary) -> Dictionary:
 
 	cam.global_transform = orig_transform
 	cam.fov = orig_fov
+	vp3d.debug_draw = orig_debug_draw
 
 	var cols: int = ceili(sqrt(thumbs.size()))
 	var rows: int = ceili(float(thumbs.size()) / cols)
@@ -1222,6 +1253,9 @@ func _isolate_screenshot(params: Dictionary) -> Dictionary:
 	var elevation_degrees: float = optional_float(params, "elevation_degrees", 25.0)
 	var padding: float = clampf(optional_float(params, "padding", 1.4), 1.0, 5.0)
 	var thumb_size: int = clampi(optional_int(params, "thumb_size", 512), 64, 2048)
+	var debug_draw_result := _resolve_debug_draw_mode(optional_string(params, "debug_draw", "normal"))
+	if debug_draw_result.has("error"):
+		return debug_draw_result["error"]
 
 	var aabb: Variant = _world_aabb_of(node, true)
 	if aabb == null:
@@ -1244,6 +1278,8 @@ func _isolate_screenshot(params: Dictionary) -> Dictionary:
 
 	var orig_transform := cam.global_transform
 	var orig_fov := cam.fov
+	var orig_debug_draw := vp3d.debug_draw
+	vp3d.debug_draw = debug_draw_result["value"]
 	var fov := 50.0
 	var distance: float = radius * padding / sin(deg_to_rad(fov * 0.5))
 	cam.fov = fov
@@ -1269,6 +1305,7 @@ func _isolate_screenshot(params: Dictionary) -> Dictionary:
 
 	cam.global_transform = orig_transform
 	cam.fov = orig_fov
+	vp3d.debug_draw = orig_debug_draw
 	for vi in hidden:
 		vi.visible = true
 
