@@ -23,6 +23,9 @@ func get_commands() -> Dictionary:
 		"add_csg_shape": _add_csg_shape,
 		"add_multimesh_scatter": _add_multimesh_scatter,
 		"add_path3d": _add_path3d,
+		"get_skeleton_info": _get_skeleton_info,
+		"set_bone_pose": _set_bone_pose,
+		"attach_to_bone": _attach_to_bone,
 	}
 
 
@@ -281,6 +284,36 @@ func get_command_schemas() -> Dictionary:
 				"parent_path": {"type": "string", "required": false, "default": ".", "desc": "Scene-relative path to the parent node"},
 				"name": {"type": "string", "required": false, "default": "Path3D"},
 				"add_path_follow": {"type": "bool", "required": false, "default": false, "desc": "Also add a PathFollow3D child"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
+		},
+		"get_skeleton_info": {
+			"category": "3d",
+			"summary": "Lists a Skeleton3D's bones (name, index, parent index, rest transform).",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to a Skeleton3D"},
+			},
+			"annotations": {"readOnly": true, "destructive": false, "idempotent": true},
+		},
+		"set_bone_pose": {
+			"category": "3d",
+			"summary": "Sets a bone's pose position/rotation/scale (Skeleton3D.set_bone_pose_*), relative to its rest transform. Omitted fields are left unchanged.",
+			"params": {
+				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to a Skeleton3D"},
+				"bone": {"type": "string", "required": true, "desc": "Bone name"},
+				"position": {"type": "any", "required": false, "desc": "Vector3-like"},
+				"rotation": {"type": "any", "required": false, "desc": "Vector3-like, radians (euler)"},
+				"scale": {"type": "any", "required": false, "desc": "Vector3-like"},
+			},
+			"annotations": {"readOnly": false, "destructive": false, "idempotent": true},
+		},
+		"attach_to_bone": {
+			"category": "3d",
+			"summary": "Creates a BoneAttachment3D bound to the given bone under a Skeleton3D and reparents an existing node under it, so the node follows the bone's pose.",
+			"params": {
+				"skeleton_path": {"type": "string", "required": true, "desc": "Scene-relative path to a Skeleton3D"},
+				"bone": {"type": "string", "required": true, "desc": "Bone name to attach to"},
+				"node_path": {"type": "string", "required": true, "desc": "Scene-relative path to the node to reparent under the new BoneAttachment3D"},
 			},
 			"annotations": {"readOnly": false, "destructive": false, "idempotent": false},
 		},
@@ -1748,4 +1781,113 @@ func _add_path3d(params: Dictionary) -> Dictionary:
 		"name": str(path3d.name),
 		"point_count": curve.point_count,
 		"path_follow_node": follow_path_str,
+	})
+
+
+## ─── get_skeleton_info / set_bone_pose / attach_to_bone ────────────────────
+
+func _get_skeleton_info(params: Dictionary) -> Dictionary:
+	var result := require_string(params, "node_path")
+	if result[1] != null:
+		return result[1]
+	var node := find_node_by_path(result[0])
+	if node == null:
+		return error_not_found("Node '%s'" % result[0])
+	if not node is Skeleton3D:
+		return error_invalid_params("Node '%s' is a %s, not a Skeleton3D" % [result[0], node.get_class()])
+
+	var skel := node as Skeleton3D
+	var bones: Array = []
+	for i in skel.get_bone_count():
+		var rest := skel.get_bone_rest(i)
+		bones.append({
+			"index": i,
+			"name": skel.get_bone_name(i),
+			"parent_index": skel.get_bone_parent(i),
+			"rest_position": {"x": rest.origin.x, "y": rest.origin.y, "z": rest.origin.z},
+		})
+	return success({"node_path": result[0], "bone_count": skel.get_bone_count(), "bones": bones})
+
+
+func _set_bone_pose(params: Dictionary) -> Dictionary:
+	var path_result := require_string(params, "node_path")
+	if path_result[1] != null:
+		return path_result[1]
+	var bone_result := require_string(params, "bone")
+	if bone_result[1] != null:
+		return bone_result[1]
+
+	var node := find_node_by_path(path_result[0])
+	if node == null:
+		return error_not_found("Node '%s'" % path_result[0])
+	if not node is Skeleton3D:
+		return error_invalid_params("Node '%s' is a %s, not a Skeleton3D" % [path_result[0], node.get_class()])
+
+	var skel := node as Skeleton3D
+	var bone_name: String = bone_result[0]
+	var idx := skel.find_bone(bone_name)
+	if idx < 0:
+		return error_not_found("Bone '%s' on '%s'" % [bone_name, path_result[0]])
+
+	if params.has("position"):
+		skel.set_bone_pose_position(idx, _parse_vector3_param(params, "position", Vector3.ZERO))
+	if params.has("rotation"):
+		var euler := _parse_vector3_param(params, "rotation", Vector3.ZERO)
+		skel.set_bone_pose_rotation(idx, Basis.from_euler(euler).get_rotation_quaternion())
+	if params.has("scale"):
+		skel.set_bone_pose_scale(idx, _parse_vector3_param(params, "scale", Vector3.ONE))
+
+	return success({"node_path": path_result[0], "bone": bone_name, "bone_index": idx})
+
+
+func _attach_to_bone(params: Dictionary) -> Dictionary:
+	var skel_result := require_string(params, "skeleton_path")
+	if skel_result[1] != null:
+		return skel_result[1]
+	var bone_result := require_string(params, "bone")
+	if bone_result[1] != null:
+		return bone_result[1]
+	var target_result := require_string(params, "node_path")
+	if target_result[1] != null:
+		return target_result[1]
+
+	var root := get_edited_root()
+	if root == null:
+		return error_no_scene()
+
+	var skel_node := find_node_by_path(skel_result[0])
+	if skel_node == null:
+		return error_not_found("Node '%s'" % skel_result[0])
+	if not skel_node is Skeleton3D:
+		return error_invalid_params("Node '%s' is a %s, not a Skeleton3D" % [skel_result[0], skel_node.get_class()])
+
+	var skel := skel_node as Skeleton3D
+	var bone_name: String = bone_result[0]
+	if skel.find_bone(bone_name) < 0:
+		return error_not_found("Bone '%s' on '%s'" % [bone_name, skel_result[0]])
+
+	var target := find_node_by_path(target_result[0])
+	if target == null:
+		return error_not_found("Node '%s'" % target_result[0])
+
+	var attachment := BoneAttachment3D.new()
+	attachment.name = "BoneAttachment3D_" + bone_name
+	attachment.bone_name = bone_name
+	add_child_with_undo(skel, attachment, root, "MCP: Add BoneAttachment3D")
+
+	var old_parent := target.get_parent()
+	var undo_redo := get_undo_redo()
+	undo_redo.create_action("MCP: Reparent to BoneAttachment3D")
+	undo_redo.add_do_method(old_parent, "remove_child", target)
+	undo_redo.add_do_method(attachment, "add_child", target)
+	undo_redo.add_do_method(target, "set_owner", root)
+	undo_redo.add_undo_method(attachment, "remove_child", target)
+	undo_redo.add_undo_method(old_parent, "add_child", target)
+	undo_redo.add_undo_method(target, "set_owner", root)
+	undo_redo.commit_action()
+
+	return success({
+		"attachment_node_path": str(root.get_path_to(attachment)),
+		"node_path": str(root.get_path_to(target)),
+		"bone": bone_name,
 	})
