@@ -1,23 +1,44 @@
 {
-  "name": "godot-mcp",
-  "version": "0.1.0",
-  "description": "MCP bridge for Godot editor — call any addon method via WebSocket JSON-RPC",
+  "name": "godot-hands",
+  "version": "1.0.0",
+  "description": "Give your AI assistant hands on the Godot editor — 10 MCP tools, a live catalog of 210 addon methods, zero tool-spray",
   "type": "module",
   "main": "dist/index.js",
+  "bin": {
+    "godot-hands": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "plugin",
+    "README.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=18"
-  },
-  "bin": {
-    "godot-mcp": "dist/index.js"
   },
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
+    "prepublishOnly": "npm run build && npm test",
     "test": "vitest run",
     "test:godot": "node scripts/run-godot-tests.mjs",
     "contract": "node scripts/contract-check.mjs",
     "token-cost": "node scripts/token-cost.mjs"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WindSeries83/godot-mcp.git"
+  },
+  "homepage": "https://github.com/WindSeries83/godot-mcp#readme",
+  "bugs": "https://github.com/WindSeries83/godot-mcp/issues",
+  "keywords": [
+    "godot",
+    "mcp",
+    "modelcontextprotocol",
+    "ai",
+    "gamedev",
+    "editor"
+  ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.9.0"
   },

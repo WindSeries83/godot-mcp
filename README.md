@@ -1,18 +1,19 @@
 [🇫🇷 Français](#fr) · [🇬🇧 English](#en)
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
+[![npm](https://img.shields.io/npm/v/godot-hands.svg)](https://www.npmjs.com/package/godot-hands)
 ![Godot 4.3+](https://img.shields.io/badge/Godot-4.3%2B-478cbf.svg)
 ![Node >=18](https://img.shields.io/badge/Node-%3E%3D18-339933.svg)
 ![Zero runtime deps](https://img.shields.io/badge/runtime%20deps-MCP%20SDK%20only-informational.svg)
 
 ---
 
-# <a id="fr"></a>godot-mcp
+# <a id="fr"></a>godot-hands
 
-**Donnez à votre assistant IA les mains sur l'éditeur Godot — sans lui donner 100 outils à trier.**
+**Donnez les mains à votre assistant IA sur l'éditeur Godot — avec 10 outils au lieu de 100.**
 
 ```
-Assistant IA <---stdio/MCP---> godot-mcp <---WebSocket:6505---> Plugin Godot
+Assistant IA <---stdio/MCP---> godot-hands <---WebSocket:6505---> Plugin Godot
 ```
 
 ## Pourquoi celui-ci
@@ -23,7 +24,7 @@ que le modèle doit lire et trier avant chaque appel. Plus la surface est
 large, moins un LLM choisit le bon outil de façon fiable, et plus chaque
 requête coûte cher en tokens rien que pour décrire les outils disponibles.
 
-godot-mcp prend le pari inverse : **10 outils**, dont un seul (`godot_call`)
+godot-hands prend le pari inverse : **10 outils**, dont un seul (`godot_call`)
 donne accès à un catalogue de **210 méthodes** réparties en ~25 catégories
 (scène, nodes, 3D, physique, animation, shaders, tilemap, particules, audio,
 navigation, export Android, tests…), découvert **en direct** auprès de
@@ -69,38 +70,31 @@ WebSocket — vous savez exactement ce qui tourne et où.
 
 ## Installation
 
-### 1. Plugin Godot
-
-Copiez le dossier `plugin/` dans `addons/godot_mcp/` de votre projet Godot.
-
-```
-votre-projet/
-└── addons/
-    └── godot_mcp/       ← copiez plugin/ ici
-```
-
-Activez-le : **Projet → Paramètres du projet → Plugins → godot-mcp → Activer**
-
-### 2. Serveur
+Deux commandes, zéro build, pas de clone de dépôt :
 
 ```bash
-npm install && npm run build && npm start
+# 1. Pose l'addon Godot dans votre projet (addons/godot_mcp/)
+npx godot-hands install ./mon-jeu
 ```
 
-### 3. Client MCP
-
-Ajoutez à la config de votre client IA (`.mcp.json`, `claude.json`, `opencode.json`) :
+Activez-le : **Projet → Paramètres du projet → Plugins → godot-hands → Activer**
 
 ```json
 {
   "mcpServers": {
-    "godot-mcp": {
-      "command": "node",
-      "args": ["/chemin/vers/godot-mcp/dist/index.js"]
+    "godot-hands": {
+      "command": "npx",
+      "args": ["-y", "godot-hands"]
     }
   }
 }
 ```
+
+Préférez installer une bonne fois pour toutes ? `npm install -g godot-hands`,
+puis `"command": "godot-hands"` dans la config. Le paquet npm embarque le
+plugin Godot : la sous-commande `install` le copie depuis `node_modules`
+(ou copiez manuellement `node_modules/godot-hands/plugin/` vers
+`addons/godot_mcp/`, c'est équivalent).
 
 ## Outils
 
@@ -174,8 +168,8 @@ téléchargement peut prendre du temps sur une connexion lente.
 ## Arborescence
 
 ```
-godot-mcp/
-├── plugin/              ← Plugin Godot (à copier dans votre projet)
+godot-hands/
+├── plugin/              ← Plugin Godot (embarqué dans le paquet npm)
 ├── src/index.ts         ← Serveur MCP (Node.js)
 ├── src/assets/          ← Sourcing d'assets CC0 (Poly Haven, ambientCG)
 ├── package.json
@@ -201,12 +195,12 @@ Ce plugin Godot dérive de [godot-mcp-pro](https://github.com/youichi-uda/godot-
 
 ---
 
-# <a id="en"></a>godot-mcp
+# <a id="en"></a>godot-hands
 
-**Give your AI assistant real control of the Godot editor — without handing it 100 tools to sort through.**
+**Give your AI assistant real control of the Godot editor — with 10 tools instead of 100.**
 
 ```
-AI Assistant <---stdio/MCP---> godot-mcp <---WebSocket:6505---> Godot Plugin
+AI Assistant <---stdio/MCP---> godot-hands <---WebSocket:6505---> Godot Plugin
 ```
 
 ## Why this one
@@ -217,7 +211,7 @@ every single call. The bigger that surface gets, the less reliably an LLM
 picks the right tool, and the more tokens get burned on tool descriptions
 before the conversation even starts.
 
-godot-mcp takes the opposite bet: **10 tools**, one of which (`godot_call`)
+godot-hands takes the opposite bet: **10 tools**, one of which (`godot_call`)
 opens onto a catalog of **210 methods** across ~25 categories (scene,
 nodes, 3D, physics, animation, shaders, tilemaps, particles, audio,
 navigation, Android export, testing…), discovered **live** from the
@@ -262,38 +256,31 @@ WebSocket client — you know exactly what's running and where.
 
 ## Setup
 
-### 1. Godot Plugin
-
-Copy the `plugin/` folder into your project's `addons/godot_mcp/`.
-
-```
-your-project/
-└── addons/
-    └── godot_mcp/       ← copy plugin/ here
-```
-
-Enable it: **Project → Project Settings → Plugins → godot-mcp → Enable**
-
-### 2. Server
+Two commands, zero build, no repo clone:
 
 ```bash
-npm install && npm run build && npm start
+# 1. Drops the Godot addon into your project (addons/godot_mcp/)
+npx godot-hands install ./my-game
 ```
 
-### 3. MCP Client
-
-Add to your AI client config (`.mcp.json`, `claude.json`, `opencode.json`):
+Enable it: **Project → Project Settings → Plugins → godot-hands → Enable**
 
 ```json
 {
   "mcpServers": {
-    "godot-mcp": {
-      "command": "node",
-      "args": ["/path/to/godot-mcp/dist/index.js"]
+    "godot-hands": {
+      "command": "npx",
+      "args": ["-y", "godot-hands"]
     }
   }
 }
 ```
+
+Prefer a permanent install? `npm install -g godot-hands`, then use
+`"command": "godot-hands"` in the config. The npm package ships the Godot
+plugin itself: the `install` subcommand copies it out of `node_modules`
+(or manually copy `node_modules/godot-hands/plugin/` to `addons/godot_mcp/`
+— same thing).
 
 ## Tools
 
@@ -371,8 +358,8 @@ npm run token-cost  # measures the tool surface's token weight (and the counterf
 ## Structure
 
 ```
-godot-mcp/
-├── plugin/              ← Godot plugin (copy to your project)
+godot-hands/
+├── plugin/              ← Godot plugin (bundled in the npm package)
 ├── src/index.ts         ← MCP server (Node.js)
 ├── src/assets/          ← CC0 asset sourcing (Poly Haven, ambientCG)
 ├── test/                ← vitest suite + headless GDScript fixture project

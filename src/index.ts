@@ -13,7 +13,7 @@ import {
 import http from "node:http";
 import crypto from "node:crypto";
 import { Duplex } from "node:stream";
-import { readFileSync } from "node:fs";
+import { readFileSync, cpSync } from "node:fs";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -219,7 +219,7 @@ async function runDoctor(): Promise<DoctorCheck[]> {
       ok: false,
       label: "Editor connected",
       detail: "No Godot editor connected.",
-      suggestion: "Start Godot with the godot_mcp plugin enabled (Project Settings → Plugins → godot-mcp).",
+      suggestion: "Start Godot with the godot_mcp addon enabled (Project Settings → Plugins → godot-hands).",
     });
   }
 
@@ -689,7 +689,7 @@ export class GodotBridge {
 const godot = new GodotBridge();
 
 export const server = new Server(
-  { name: "godot-mcp", version: "0.1.0" },
+  { name: "godot-hands", version: "1.0.0" },
   { capabilities: { tools: {}, resources: {}, prompts: {} } },
 );
 
@@ -1216,11 +1216,34 @@ async function main() {
   await server.connect(transport);
 }
 
+export function installAddon(projectDir: string): string {
+  const pluginSrc = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "plugin");
+  const dest = path.resolve(projectDir, "addons", "godot_mcp");
+  cpSync(pluginSrc, dest, { recursive: true });
+  return dest;
+}
+
 // Only run the server when this file is the process entrypoint, not when a
 // test suite imports it for its pure helpers (wsAccept/wsSend/decodeFrame/
 // GodotBridge) — otherwise every test run would bind real ports and attach a
 // real stdio transport.
 const isEntrypoint = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isEntrypoint) {
-  main().catch((err) => { console.error("Fatal:", err); process.exit(1); });
+  if (process.argv[2] === "install") {
+    const target = process.argv[3];
+    if (!target) {
+      console.error("Usage: godot-hands install <path/to/godot/project>");
+      process.exit(1);
+    }
+    try {
+      const dest = installAddon(target);
+      console.log(`Godot addon installed at ${dest}`);
+      console.log("Enable it in the editor: Project → Project Settings → Plugins → godot-hands.");
+    } catch (err) {
+      console.error(`godot-mcp: install failed: ${(err as Error).message}`);
+      process.exit(1);
+    }
+  } else {
+    main().catch((err) => { console.error("Fatal:", err); process.exit(1); });
+  }
 }
