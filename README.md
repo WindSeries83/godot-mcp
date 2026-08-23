@@ -191,8 +191,6 @@ npm run token-cost  # mesure le poids en tokens de la surface d'outils (et le co
 
 MIT
 
-Ce plugin Godot dérive de [godot-mcp-pro](https://github.com/youichi-uda/godot-mcp-pro) (Youichi Uda, MIT).
-
 ---
 
 # <a id="en"></a>godot-hands
@@ -372,5 +370,3 @@ godot-hands/
 ## License
 
 MIT
-
-This Godot plugin is derived from [godot-mcp-pro](https://github.com/youichi-uda/godot-mcp-pro) (Youichi Uda, MIT).
